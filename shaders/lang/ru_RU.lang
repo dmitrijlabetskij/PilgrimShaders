@@ -1,0 +1,29 @@
+# Russian localization for Iris Shader Options
+option.SHADOW_SAMPLES=Качество теней (выборки PCF)
+option.SHADOW_SAMPLES.comment=Количество аппаратных 2x2 PCF выборок на пиксель. 1 = Макс. FPS, 2 = Баланс, 4 = Мягкие.
+option.SHADOW_SAMPLES.1=1 выборка (Ультра FPS)
+option.SHADOW_SAMPLES.2=2 выборки (Баланс)
+option.SHADOW_SAMPLES.4=4 выборки (Мягкие)
+
+option.shadowMapResolution=Разрешение карты теней
+option.shadowMapResolution.comment=Более высокое разрешение даёт чёткие тени ценой лишних обращений к памяти.
+option.shadowDistance=Дальность теней
+option.shadowDistance.comment=Радиус карты теней в блоках вокруг игрока.
+option.SHADOW_DISTORTION=Фокус теней у игрока
+option.SHADOW_DISTORTION.comment=Увеличивает плотность текселей теней вблизи игрока без роста разрешения карты.
+
+option.CLOUDS_ENABLED=Процедурные облака
+option.CLOUDS_ENABLED.comment=Лёгкие аналитические облака без текстурных выборок.
+option.WAVE_ANIMATION=Анимация травы и воды
+option.WAVE_ANIMATION.comment=Колыхание листвы, травы и поверхности воды в вершинном шейдере.
+option.DYNAMIC_HANDLIGHT=Динамический свет в руке
+option.DYNAMIC_HANDLIGHT.comment=Освещение окружения от факела или светящегося блока в руке.
+
+option.TONEMAP_MODE=Кривая тонмаппинга
+option.TONEMAP_MODE.0=AgX (Естественный)
+option.TONEMAP_MODE.1=ACES (Насыщенный)
+
+option.EXPOSURE=Экспозиция
+option.SATURATION=Насыщенность
+option.CONTRAST=Контраст
+option.FOG_DENSITY=Плотность тумана

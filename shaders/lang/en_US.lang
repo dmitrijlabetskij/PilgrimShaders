@@ -1,0 +1,29 @@
+# English localization for Iris Shader Options
+option.SHADOW_SAMPLES=Shadow Quality (PCF Taps)
+option.SHADOW_SAMPLES.comment=Hardware 2x2 PCF taps per pixel. 1 = Max FPS, 2 = Balanced (Recommended), 4 = Soft.
+option.SHADOW_SAMPLES.1=1-Tap (Ultra)
+option.SHADOW_SAMPLES.2=2-Tap (Balanced)
+option.SHADOW_SAMPLES.4=4-Tap (Soft)
+
+option.shadowMapResolution=Shadow Map Resolution
+option.shadowMapResolution.comment=Higher resolution increases sharpness at higher memory bandwidth cost.
+option.shadowDistance=Shadow Distance
+option.shadowDistance.comment=Shadow map coverage radius in blocks.
+option.SHADOW_DISTORTION=Shadow Focus Bias
+option.SHADOW_DISTORTION.comment=Higher values concentrate shadow texels closer to the player.
+
+option.CLOUDS_ENABLED=Procedural Clouds
+option.CLOUDS_ENABLED.comment=Zero-texture ALU analytical cloud layer.
+option.WAVE_ANIMATION=Waving Foliage & Water
+option.WAVE_ANIMATION.comment=Pure ALU vertex wind animation for grass, leaves, and water.
+option.DYNAMIC_HANDLIGHT=Dynamic Handlight
+option.DYNAMIC_HANDLIGHT.comment=Illuminates surroundings when holding torches or light blocks.
+
+option.TONEMAP_MODE=Tonemapping Curve
+option.TONEMAP_MODE.0=AgX (Filmic)
+option.TONEMAP_MODE.1=ACES (Vibrant)
+
+option.EXPOSURE=Exposure
+option.SATURATION=Saturation
+option.CONTRAST=Contrast
+option.FOG_DENSITY=Atmospheric Fog Density
