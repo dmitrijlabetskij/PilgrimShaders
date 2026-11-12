@@ -2,7 +2,7 @@
 #define LIB_SETTINGS_GLSL
 
 // =============================================================================
-// LumenLite Configuration & Material IDs (Iris / Vulkan-Aperture Portable)
+// PilgrimShaders Configuration & Material IDs (Iris / Vulkan-Aperture Portable)
 // =============================================================================
 
 // --- Shadow Settings ---

@@ -1,4 +1,4 @@
-# Инструменты и каталоги сборки LumenLite (Iris + Vulkan-ready core)
+# Инструменты и каталоги сборки PilgrimShaders (Iris + Vulkan-ready core)
 PYTHON = python3
 GLSLANG = glslangValidator
 GLSLC := $(shell command -v glslc 2>/dev/null)
@@ -6,7 +6,7 @@ GLSLC := $(shell command -v glslc 2>/dev/null)
 SRC_DIR = shaders/src
 OUT_DIR = shaders/compiled
 DIST_DIR = dist
-PACK_ZIP = $(DIST_DIR)/LumenLite-Iris.zip
+PACK_ZIP = $(DIST_DIR)/PilgrimShaders.zip
 
 # Поиск опциональных Vulkan/Aperture .vert, .frag, .comp исходников в shaders/src
 VERT_SOURCES = $(wildcard $(SRC_DIR)/*.vert)
