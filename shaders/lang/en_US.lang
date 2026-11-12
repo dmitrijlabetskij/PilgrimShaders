@@ -1,8 +1,9 @@
 # English localization for Iris Shader Options
 option.SHADOW_SAMPLES=Shadow Quality (PCF Taps)
-option.SHADOW_SAMPLES.comment=Hardware 2x2 PCF taps per pixel. 1 = Max FPS, 2 = Balanced (Recommended), 4 = Soft.
-option.SHADOW_SAMPLES.1=1-Tap (Ultra)
-option.SHADOW_SAMPLES.2=2-Tap (Balanced)
+option.SHADOW_SAMPLES.comment=Hardware 2x2 PCF taps per pixel. 1 = Max FPS, 2 = Fast, 3 = Smooth (Recommended), 4 = Soft.
+option.SHADOW_SAMPLES.1=1-Tap (Ultra FPS)
+option.SHADOW_SAMPLES.2=2-Tap (Fast)
+option.SHADOW_SAMPLES.3=3-Tap (Smooth)
 option.SHADOW_SAMPLES.4=4-Tap (Soft)
 
 option.shadowMapResolution=Shadow Map Resolution

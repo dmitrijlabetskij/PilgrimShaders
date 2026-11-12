@@ -15,7 +15,11 @@ SHADERS_DIR = ROOT / "shaders"
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s+"([^"]+)"\s*$')
 
 
-def expand_includes(path: pathlib.Path, extra_defines: dict[str, str] | None = None) -> str:
+def expand_includes(
+    path: pathlib.Path,
+    extra_defines: dict[str, str] | None = None,
+    prepend_defines: list[str] | None = None,
+) -> str:
     """Recursively expand Iris #include \"/...\" directives."""
     lines_out: list[str] = []
     for raw_line in path.read_text(encoding="utf-8").splitlines():
@@ -38,6 +42,9 @@ def expand_includes(path: pathlib.Path, extra_defines: dict[str, str] | None = N
                         line = f"#define {key} {val}"
                     break
         lines_out.append(line)
+        if prepend_defines and line.lstrip().startswith("#version"):
+            for macro in prepend_defines:
+                lines_out.append(f"#define {macro}")
     return "\n".join(lines_out) + "\n"
 
 
@@ -76,6 +83,7 @@ def validate_iris_shaders(tmp_dir: pathlib.Path) -> int:
     # Also test key setting permutations on deferred & water passes
     variants = [
         {"SHADOW_SAMPLES": "1", "TONEMAP_MODE": "1"},
+        {"SHADOW_SAMPLES": "2"},
         {"SHADOW_SAMPLES": "4", "CLOUDS_ENABLED": "UNDEF", "WAVE_ANIMATION": "UNDEF", "DYNAMIC_HANDLIGHT": "UNDEF"},
     ]
     for idx, defs in enumerate(variants):
@@ -154,8 +162,8 @@ void main() {
     vec3 lit = shadeOverworldSurface(lin, atmo);
     lit = applyOverworldMediumAndFog(lit, viewDir, inFeetPos, 32.0, 256.0, atmo, ubo.camPos.y, 0, 0.0, 0.0);
     vec4 water = shadeOverworldWater(
-        vec3(0.1, 0.3, 0.4), inFeetPos, vec3(0.0, 1.0, 0.0), inFeetPos, viewDir,
-        ubo.camPos, skyL, blockL, sh, 3.0, false, atmo, ubo.timeSec
+        vec3(0.1, 0.3, 0.4), inFeetPos, vec3(0.0, 1.0, 0.0), inFeetPos, viewDir, 32.0,
+        ubo.camPos, skyL, blockL, sh, 3.0, false, 0.8, 0.0, atmo, ubo.timeSec
     );
     vec3 merged = mix(lit, water.rgb, water.a);
     outColor = vec4(applyGradingAndTonemap(merged, gl_FragCoord.xy), 1.0);

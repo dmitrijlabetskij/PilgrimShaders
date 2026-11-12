@@ -37,69 +37,59 @@ float valueNoise2D(vec2 p) {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-// Fast 2-octave rotated FBM for clouds (~16 ALU ops, 0 texture reads)
+// Anisotropic periodic 2D value noise + analytical gradient: vec3(val, ddx, ddz).
+// Separate X/Z period masks wrap seamlessly on 64-block world coordinates.
+vec3 valueNoise2DGradAniso(vec2 p, ivec2 periodMask, ivec2 seedOffset) {
+    vec2 i = floor(p);
+    vec2 f = p - i;
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    vec2 du = 6.0 * f * (1.0 - f);
+
+    ivec2 ip0 = ivec2(i);
+    ivec2 p00 = (ip0 & periodMask) + seedOffset;
+    ivec2 p10 = ((ip0 + ivec2(1, 0)) & periodMask) + seedOffset;
+    ivec2 p01 = ((ip0 + ivec2(0, 1)) & periodMask) + seedOffset;
+    ivec2 p11 = ((ip0 + ivec2(1, 1)) & periodMask) + seedOffset;
+
+    float a = hash21(p00);
+    float b = hash21(p10);
+    float c = hash21(p01);
+    float d = hash21(p11);
+
+    float k1 = b - a;
+    float k2 = c - a;
+    float k3 = a - b - c + d;
+
+    float val = a + k1 * u.x + k2 * u.y + k3 * u.x * u.y;
+    vec2 grad = du * vec2(k1 + k3 * u.y, k2 + k3 * u.x);
+    return vec3(val, grad);
+}
+
+// Fast 3-octave rotated FBM (nebula / general wispy noise, 0 texture reads)
 float cloudFbm(vec2 p) {
     const mat2 rot = mat2(0.80, -0.60, 0.60, 0.80);
-    float sum = 0.68 * valueNoise2D(p);
-    p = rot * p * 2.13 + vec2(17.3, 9.1);
-    sum += 0.32 * valueNoise2D(p);
+    float sum = 0.56 * valueNoise2D(p);
+    p = rot * p * 2.08 + vec2(17.3, 9.1);
+    sum += 0.29 * valueNoise2D(p);
+    p = rot * p * 2.12 + vec2(11.7, 23.4);
+    sum += 0.15 * valueNoise2D(p);
     return sum;
 }
 
-// Single-grid directional travelling Gaussian wavelet bump (returns vec3(height, dH/dx, dH/dz)).
-// Smoothly fades in, travels along windDir, and fades out; zero rings, zero cell boundary seams.
-vec3 evalDirectionalWaveletGrid(
-    vec2 worldXZMod64,
-    float scale,
-    int periodMask,
-    float timeSec,
-    float speed,
-    float rainStrength,
-    vec2 gridShift,
-    int seedOffset,
-    float timeOffset
-) {
-    const vec2 WIND_DIR  = vec2(0.920726, 0.390211); // normalize(vec2(0.92, 0.39))
-    const vec2 WIND_PERP = vec2(-0.390211, 0.920726);
+// Lightweight 2-octave cloud density used for cloud volume slices, self-shadowing & reflections
+float cloudShapeShadow(vec2 p) {
+    float macro = valueNoise2D(p * 0.42 + vec2(3.7, -5.2));
+    float n0 = valueNoise2D(p);
+    return clamp(n0 * 0.62 + macro * 0.38, 0.0, 1.0);
+}
 
-    vec2 p = worldXZMod64 * scale + gridShift;
-    ivec2 cell = ivec2(floor(p)) & periodMask;
-    vec2 local = fract(p) - 0.5;
-
-    float cellPhase = hash21(cell + ivec2(seedOffset, seedOffset * 3)) * 16.0;
-    float cycle = timeSec * speed + cellPhase + timeOffset;
-    int epoch = int(floor(cycle)) & 1023;
-    float life = fract(cycle);
-
-    ivec2 seed = cell + ivec2(epoch * 37 + seedOffset, epoch * 91 + seedOffset * 2);
-    float spawnThresh = 0.70 - 0.45 * rainStrength;
-    if (hash21(seed) <= spawnThresh) {
-        return vec3(0.0);
-    }
-
-    vec2 startPos = (vec2(hash21(seed + ivec2(13, 7)), hash21(seed + ivec2(29, 43))) - 0.5) * 0.08;
-    vec2 center = startPos + WIND_DIR * ((life - 0.5) * 0.32);
-    vec2 delta = local - center;
-
-    float along  = dot(delta, WIND_DIR);
-    float across = dot(delta, WIND_PERP);
-    float q = along * along * 52.0 + across * across * 24.0;
-    if (q > 8.0) {
-        return vec3(0.0);
-    }
-
-    float h = exp(-q);
-    float fade = sin(life * 3.14159265);
-    fade *= fade;
-
-    float edgeDist = max(abs(local.x), abs(local.y));
-    float edgeFade = smoothstep(0.49, 0.26, edgeDist);
-    float amp = fade * edgeFade;
-
-    float dHa = -104.0 * along  * h * amp * scale;
-    float dHc = -48.0  * across * h * amp * scale;
-    vec2 grad = dHa * WIND_DIR + dHc * WIND_PERP;
-    return vec3(h * amp, grad);
+// Crisp 3-octave volumetric cloud slice density (smooth puff detail + macro banks)
+float cloudShapeSlice(vec2 p) {
+    const mat2 rot = mat2(0.80, -0.60, 0.60, 0.80);
+    float macro = valueNoise2D(p * 0.40 + vec2(3.7, -5.2));
+    float n0 = valueNoise2D(p);
+    float n1 = valueNoise2D(rot * p * 2.15 + vec2(17.3, 9.1));
+    return clamp(n0 * 0.48 + n1 * 0.20 + macro * 0.32, 0.0, 1.0);
 }
 
 #endif // LIB_NOISE_GLSL

@@ -15,6 +15,7 @@
 
 uniform mat4 gbufferModelView;
 uniform mat4 gbufferModelViewInverse;
+uniform mat4 gbufferProjectionInverse;
 uniform mat4 shadowModelView;
 uniform mat4 shadowProjection;
 uniform vec3 cameraPosition;
@@ -30,9 +31,17 @@ out vec2 vLm;
 out vec4 vColor;
 out vec3 vWorldNormal;
 out vec3 vFeetPos;
+out float vWaterLinearZ;
+flat out vec2 vDepthCoeff;
 flat out float vIsWater;
-flat out vec3 vSunDir;
-flat out vec3 vShadowDir;
+flat out vec4 vAtmoZenith;
+flat out vec4 vAtmoHorizon;
+flat out vec4 vAtmoMie;
+flat out vec4 vAtmoDirect;
+flat out vec4 vAtmoAmbSky;
+flat out vec3 vAtmoAmbGround;
+flat out vec3 vAtmoSunDir;
+flat out vec3 vAtmoShadowDir;
 flat out vec4 vShadowC0;
 flat out vec4 vShadowC1;
 flat out vec4 vShadowC2;
@@ -62,8 +71,19 @@ void main() {
 #endif
 
     vFeetPos = feetPos;
-    vSunDir = viewDirToWorld(sunPosition, gbufferModelViewInverse);
-    vShadowDir = viewDirToWorld(shadowLightPosition, gbufferModelViewInverse);
+    vWaterLinearZ = -viewPos.z;
+    vDepthCoeff = vec2(
+        2.0 * gbufferProjectionInverse[2][3],
+        gbufferProjectionInverse[3][3] - gbufferProjectionInverse[2][3]
+    );
+    vec3 sunDir = viewDirToWorld(sunPosition, gbufferModelViewInverse);
+    vec3 shadowDir = viewDirToWorld(shadowLightPosition, gbufferModelViewInverse);
+    AtmosphereState atmo = buildAtmosphere(sunDir, shadowDir, rainStrength);
+    packAtmosphereVaryings(atmo, vAtmoZenith, vAtmoHorizon, vAtmoMie, vAtmoDirect, vAtmoAmbSky);
+    vAtmoAmbGround = atmo.ambientGroundColor;
+    vAtmoSunDir    = atmo.sunDir;
+    vAtmoShadowDir = atmo.shadowLightDir;
+
     mat4 shadowVP = shadowProjection * shadowModelView;
     vShadowC0 = shadowVP[0];
     vShadowC1 = shadowVP[1];
@@ -76,18 +96,14 @@ void main() {
 
 uniform sampler2D gtexture;
 uniform sampler2D depthtex1;
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 uniform sampler2DShadow shadowtex0;
-
-uniform mat4 gbufferModelViewInverse;
-uniform mat4 gbufferProjectionInverse;
+#endif
 
 uniform vec3 cameraPosition;
 uniform vec3 fogColor;
 uniform float frameTimeCounter;
-uniform float rainStrength;
 uniform float far;
-uniform float viewWidth;
-uniform float viewHeight;
 uniform float nightVision;
 uniform float blindness;
 uniform float darknessFactor;
@@ -100,9 +116,17 @@ in vec2 vLm;
 in vec4 vColor;
 in vec3 vWorldNormal;
 in vec3 vFeetPos;
+in float vWaterLinearZ;
+flat in vec2 vDepthCoeff;
 flat in float vIsWater;
-flat in vec3 vSunDir;
-flat in vec3 vShadowDir;
+flat in vec4 vAtmoZenith;
+flat in vec4 vAtmoHorizon;
+flat in vec4 vAtmoMie;
+flat in vec4 vAtmoDirect;
+flat in vec4 vAtmoAmbSky;
+flat in vec3 vAtmoAmbGround;
+flat in vec3 vAtmoSunDir;
+flat in vec3 vAtmoShadowDir;
 flat in vec4 vShadowC0;
 flat in vec4 vShadowC1;
 flat in vec4 vShadowC2;
@@ -148,7 +172,10 @@ void main() {
     float alpha = (vIsWater > 0.5) ? 0.65 : clamp01(tex.a * vColor.a);
     outColor0 = vec4(max(lit, vec3(0.0)), alpha);
 #else
-    AtmosphereState atmo = buildAtmosphere(vSunDir, vShadowDir, rainStrength);
+    AtmosphereState atmo = unpackAtmosphereVaryings(
+        vAtmoZenith, vAtmoHorizon, vAtmoMie, vAtmoDirect,
+        vAtmoAmbSky, vAtmoAmbGround, vAtmoSunDir, vAtmoShadowDir
+    );
     mat4 shadowVP = mat4(vShadowC0, vShadowC1, vShadowC2, vShadowC3);
 
     float shadowFactor = sampleShadowMap(
@@ -165,18 +192,19 @@ void main() {
     );
 
     vec4 outRgba;
+    float handLightLevel = max(float(heldBlockLightValue), float(heldBlockLightValue2)) / 15.0;
     if (vIsWater > 0.5) {
-        // Compute opaque depth behind water using 1 depthtex1 fetch on water pixels only
-        float waterThickness = 0.0;
-        if (isEyeInWater != 1) {
+        // Compute water-only path distance (air distance from eye to surface is excluded)
+        float waterPathDist;
+        if (isEyeInWater == 1) {
+            waterPathDist = viewDist;
+        } else {
             float opaqueDepth = texelFetch(depthtex1, ivec2(gl_FragCoord.xy), 0).r;
             if (opaqueDepth >= 0.999999) {
-                waterThickness = 24.0;
+                waterPathDist = 48.0;
             } else {
-                vec2 screenUV = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
-                vec3 opaqueViewPos = reconstructViewPos(screenUV, opaqueDepth, gbufferProjectionInverse);
-                vec3 opaqueFeetPos = viewToFeetPos(opaqueViewPos, gbufferModelViewInverse);
-                waterThickness = max(length(opaqueFeetPos) - viewDist, 0.0);
+                float opaqueLinearZ = 1.0 / (vDepthCoeff.x * opaqueDepth + vDepthCoeff.y);
+                waterPathDist = viewDist * max(opaqueLinearZ / max(vWaterLinearZ, 1e-4) - 1.0, 0.0);
             }
         }
         vec3 worldMod64 = getWorldPosMod64(vFeetPos, cameraPosition);
@@ -186,12 +214,15 @@ void main() {
             baseNormal,
             vFeetPos,
             viewDir,
+            viewDist,
             cameraPosition,
             vLm.y,
             vLm.x,
             shadowFactor,
-            waterThickness,
+            waterPathDist,
             (isEyeInWater == 1),
+            handLightLevel,
+            nightVision,
             atmo,
             frameTimeCounter
         );
@@ -210,7 +241,7 @@ void main() {
         lin.blockLight = vLm.x;
         lin.shadowFactor = shadowFactor;
         lin.matId = MAT_SPECULAR;
-        lin.handLightLevel = max(float(heldBlockLightValue), float(heldBlockLightValue2)) / 15.0;
+        lin.handLightLevel = handLightLevel;
         lin.nightVision = nightVision;
 
         vec3 glassLit = shadeOverworldSurface(lin, atmo);

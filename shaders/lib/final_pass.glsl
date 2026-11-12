@@ -17,7 +17,7 @@ uniform sampler2D colortex0;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    // Integer pixel fetch: 0 bilinear overhead
+    // Pure single-fetch tonemapper: 0 bilinear overhead, 0 extra G-buffer reads
     vec3 hdrColor = texelFetch(colortex0, ivec2(gl_FragCoord.xy), 0).rgb;
     vec3 finalSrgb = applyGradingAndTonemap(hdrColor, gl_FragCoord.xy);
     outColor = vec4(finalSrgb, 1.0);

@@ -9,11 +9,12 @@
 const int shadowMapResolution = 1024; // [512 1024 1536 2048]
 const float shadowDistance = 64.0;    // [48.0 64.0 80.0 96.0 128.0 160.0]
 const float sunPathRotation = -35.0;
+const float shadowIntervalSize = 4.0;
 const bool shadowHardwareFiltering = true;
 const bool shadowtex0HardwareFiltering = true;
 
-#define SHADOW_SAMPLES 1          // [1 2 4]
-#define SHADOW_DISTORTION 0.82    // [0.50 0.65 0.75 0.82 0.85 0.90]
+#define SHADOW_SAMPLES 3          // [1 2 3 4]
+#define SHADOW_DISTORTION 0.78    // [0.50 0.65 0.75 0.78 0.85 0.90]
 
 // --- Visual Features (Pure ALU / Zero-Extra-Pass) ---
 #define CLOUDS_ENABLED

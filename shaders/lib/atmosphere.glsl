@@ -42,15 +42,15 @@ AtmosphereState buildAtmosphere(vec3 sunDir, vec3 shadowLightDir, float rainStre
 
     // Sky zenith palette: night -> golden hour -> noon
     vec3 zenithNight  = vec3(0.008, 0.014, 0.042);
-    vec3 zenithSunset = vec3(0.045, 0.120, 0.380);
+    vec3 zenithSunset = vec3(0.055, 0.125, 0.400);
     vec3 zenithDay    = vec3(0.048, 0.240, 0.800);
     vec3 zenith = mix(zenithNight, zenithDay, atmo.dayFactor);
     zenith = mix(zenith, zenithSunset, atmo.sunsetFactor * 0.82);
 
     // Sky horizon palette
     vec3 horizonNight  = vec3(0.020, 0.032, 0.080);
-    vec3 horizonSunset = vec3(1.180, 0.360, 0.100);
-    vec3 horizonDay    = vec3(0.320, 0.630, 0.960);
+    vec3 horizonSunset = vec3(1.180, 0.370, 0.105);
+    vec3 horizonDay    = vec3(0.330, 0.640, 0.950);
     vec3 horizon = mix(horizonNight, horizonDay, atmo.dayFactor);
     horizon = mix(horizon, horizonSunset, atmo.sunsetFactor * 0.90);
 
@@ -66,20 +66,64 @@ AtmosphereState buildAtmosphere(vec3 sunDir, vec3 shadowLightDir, float rainStre
     vec3 mieSunset = vec3(1.45, 0.56, 0.20);
     atmo.mieColor  = mix(mieDay, mieSunset, atmo.sunsetFactor) * (1.0 - 0.80 * atmo.rainStrength);
 
-    // Direct sun/moon light color
-    vec3 sunLightNoon   = vec3(1.65, 1.52, 1.34);
-    vec3 sunLightSunset = vec3(1.75, 0.72, 0.28);
-    vec3 moonLight      = vec3(0.18, 0.26, 0.45);
+    // Direct sun/moon light color (daylight stays crisp; night moonlight is soft and moody)
+    vec3 sunLightNoon   = vec3(1.95, 1.80, 1.58);
+    vec3 sunLightSunset = vec3(1.95, 0.78, 0.30);
+    vec3 moonLight      = vec3(0.042, 0.060, 0.105);
     vec3 sunDirect = mix(sunLightSunset, sunLightNoon, smoothstep(0.0, 0.32, max(sunY, 0.0)));
     vec3 direct = mix(moonLight, sunDirect, smoothstep(-0.04, 0.08, sunY));
     // Fade direct intensity softly during dawn/dusk shadow-flip transition
     float lightSwitchFade = smoothstep(0.0, 0.10, atmo.shadowLightDir.y);
     atmo.directLightColor = direct * lightSwitchFade * (1.0 - 0.78 * atmo.rainStrength);
 
-    // Hemisphere sky ambient (coherent with sky gradient)
-    atmo.ambientSkyColor = mix(atmo.zenithColor, atmo.horizonColor, 0.45) * 0.44 + vec3(0.012, 0.016, 0.026);
-    atmo.ambientGroundColor = atmo.ambientSkyColor * vec3(0.36, 0.34, 0.32);
+    // Hemisphere sky ambient (soft fill at night so moon shadows aren't overly harsh)
+    vec3 nightFloor = mix(vec3(0.006, 0.009, 0.016), vec3(0.010, 0.014, 0.022), atmo.dayFactor);
+    atmo.ambientSkyColor = mix(atmo.zenithColor, atmo.horizonColor, 0.45) * mix(0.42, 0.34, atmo.dayFactor) + nightFloor;
+    atmo.ambientGroundColor = atmo.ambientSkyColor * mix(0.56, 0.36, atmo.dayFactor);
 
+    return atmo;
+}
+
+void packAtmosphereVaryings(
+    AtmosphereState atmo,
+    out vec4 outZenith,
+    out vec4 outHorizon,
+    out vec4 outMie,
+    out vec4 outDirect,
+    out vec4 outAmbSky
+) {
+    outZenith  = vec4(atmo.zenithColor, atmo.dayFactor);
+    outHorizon = vec4(atmo.horizonColor, atmo.sunsetFactor);
+    outMie     = vec4(atmo.mieColor, atmo.nightFactor);
+    outDirect  = vec4(atmo.directLightColor, atmo.shadowFade);
+    outAmbSky  = vec4(atmo.ambientSkyColor, atmo.rainStrength);
+}
+
+AtmosphereState unpackAtmosphereVaryings(
+    vec4 vZenith,
+    vec4 vHorizon,
+    vec4 vMie,
+    vec4 vDirect,
+    vec4 vAmbSky,
+    vec3 vAmbGround,
+    vec3 vSunDir,
+    vec3 vShadowDir
+) {
+    AtmosphereState atmo;
+    atmo.sunDir = vSunDir;
+    atmo.moonDir = -vSunDir;
+    atmo.shadowLightDir = vShadowDir;
+    atmo.dayFactor = vZenith.a;
+    atmo.sunsetFactor = vHorizon.a;
+    atmo.nightFactor = vMie.a;
+    atmo.rainStrength = vAmbSky.a;
+    atmo.shadowFade = vDirect.a;
+    atmo.zenithColor = vZenith.rgb;
+    atmo.horizonColor = vHorizon.rgb;
+    atmo.mieColor = vMie.rgb;
+    atmo.directLightColor = vDirect.rgb;
+    atmo.ambientSkyColor = vAmbSky.rgb;
+    atmo.ambientGroundColor = vAmbGround;
     return atmo;
 }
 
@@ -146,39 +190,61 @@ vec4 evalProceduralClouds(vec3 viewDir, vec3 cameraPos, AtmosphereState atmo, fl
         return vec4(0.0);
     }
 
-    // Single-plane projection + 1 shifted density tap for 3D sun-lit rim
-    float invY = 1.0 / max(viewDir.y, 0.045);
-    vec2 cloudPos = cameraPos.xz * 0.0014 + viewDir.xz * (0.48 * invY) + vec2(timeSec * 0.0065, timeSec * 0.0022);
+    // 5-slice pseudo-volumetric cloud slab (flat shaded bases, bright puffy sunlit tops)
+    float domeInvY = 1.0 / (viewDir.y + 0.09);
+    float slabParallax = min(domeInvY, 4.0);
+    vec2 wind = vec2(timeSec * 0.0075, timeSec * 0.0024);
+    vec2 basePos = cameraPos.xz * 0.0020 + viewDir.xz * (1.15 * domeInvY) + wind;
+    vec2 slabOffset = viewDir.xz * (0.26 * slabParallax);
 
-    float density = cloudFbm(cloudPos);
-    float coverage = mix(0.51, 0.34, atmo.rainStrength);
-    float alpha = smoothstep(coverage, coverage + 0.24, density);
-    if (alpha <= 0.001) {
-        return vec4(0.0);
-    }
+    float coverage = mix(0.56, 0.39, atmo.rainStrength);
+    vec3 litColor = atmo.directLightColor * 0.78 + atmo.ambientSkyColor * 2.45;
+    vec3 darkColor = mix(atmo.ambientSkyColor * 1.25, atmo.horizonColor * 0.32, 0.45);
 
-    // Directional self-shadowing sample shifted toward sun/moon horizontal direction (1 cheap octave)
-    vec2 lightStep = normalize(atmo.shadowLightDir.xz + vec2(1e-4)) * 0.065;
-    float shadowSample = valueNoise2D(cloudPos + lightStep);
-    float selfLit = clamp01(1.0 - (shadowSample - density) * 3.4);
-
-    vec3 litColor = atmo.directLightColor * 0.85 + atmo.ambientSkyColor * 2.1;
-    vec3 darkColor = atmo.ambientSkyColor * 1.35 + atmo.horizonColor * 0.25;
-    vec3 cloudColor = mix(darkColor, litColor, selfLit);
-
-    // Warm Mie silver-lining when looking near sun
+    // Silver-lining toward sun
     float sa = max(dot(viewDir, atmo.sunDir), 0.0);
     float sa2 = sa * sa;
     float sa4 = sa2 * sa2;
     float sunAlign = (sa4 * sa4) * smoothstep(-0.12, 0.15, atmo.sunDir.y);
-    cloudColor += atmo.mieColor * (sunAlign * (1.0 - density * 0.6) * 0.75);
 
-    // Blend cleanly into horizon haze
-    float horizonFade = smoothstep(0.015, 0.16, viewDir.y);
-    alpha *= horizonFade * 0.86;
+    vec3 accumColor = vec3(0.0);
+    float transmittance = 1.0;
+    const int STEPS = 5;
+    for (int i = 0; i < STEPS; ++i) {
+        // Height fraction from bottom (0.10) to top (0.90) of the cloud slab
+        float h = (float(i) + 0.5) / float(STEPS);
+        vec2 samplePos = basePos + slabOffset * h;
+        // Flat base fading sharply above h=0.2, rounded cumulus dome narrowing toward h=1.0
+        float heightShape = smoothstep(0.0, 0.22, h) * smoothstep(1.0, 0.35, h);
+        float rawDensity = cloudShapeSlice(samplePos);
+        // Slightly tighten edge near top to sculpt puffy domes over wider bases
+        float localThreshold = coverage + (1.0 - heightShape) * 0.14;
+        float sliceAlpha = smoothstep(localThreshold, localThreshold + 0.09, rawDensity) * 0.58;
+        if (sliceAlpha > 0.002) {
+            float lightMix = clamp01(0.20 + 0.78 * h + (rawDensity - localThreshold) * 0.85);
+            vec3 sliceCol = mix(darkColor, litColor, lightMix);
+            sliceCol += atmo.mieColor * (sunAlign * (1.0 - sliceAlpha * 0.7) * 0.65);
+
+            accumColor += transmittance * sliceCol * sliceAlpha;
+            transmittance *= (1.0 - sliceAlpha);
+            if (transmittance < 0.04) {
+                break;
+            }
+        }
+    }
+
+    float totalAlpha = 1.0 - transmittance;
+    if (totalAlpha <= 0.001) {
+        return vec4(0.0);
+    }
+    vec3 cloudColor = accumColor / totalAlpha;
+
+    // Seamless blend into distant horizon haze
+    float horizonFade = smoothstep(0.015, 0.18, viewDir.y);
+    totalAlpha *= horizonFade * 0.94;
     cloudColor = mix(atmo.horizonColor, cloudColor, horizonFade);
 
-    return vec4(cloudColor, alpha);
+    return vec4(cloudColor, totalAlpha);
 #endif
 }
 
@@ -220,6 +286,50 @@ vec3 evalOverworldSky(
     // Analytical clouds layered smoothly in front of stars/sun/moon
     vec4 clouds = evalProceduralClouds(viewDir, cameraPos, atmo, timeSec);
     sky = mix(sky, clouds.rgb, clouds.a);
+
+    return sky;
+}
+
+// Lightweight sky/sun/moon/cloud evaluation for rippled water reflections (~70% fewer hashes)
+vec3 evalWaterReflectionSky(
+    vec3 viewDir,
+    vec3 cameraPos,
+    AtmosphereState atmo,
+    float timeSec
+) {
+    vec3 sky = evalSkyGradient(viewDir, atmo);
+
+    float sunDot = dot(viewDir, atmo.sunDir);
+    float sunDisc = smoothstep(0.9987, 0.9994, sunDot);
+    float sunShow = smoothstep(-0.06, 0.04, atmo.sunDir.y) * (1.0 - 0.88 * atmo.rainStrength);
+    vec3 sunDiscColor = mix(vec3(1.0, 0.45, 0.15), vec3(1.0, 0.96, 0.88), smoothstep(0.0, 0.25, max(atmo.sunDir.y, 0.0)));
+    sky += sunDiscColor * (sunDisc * 12.0 * sunShow);
+
+    float moonDot = dot(viewDir, atmo.moonDir);
+    float moonDisc = smoothstep(0.9990, 0.9995, moonDot);
+    float moonShow = smoothstep(-0.04, 0.08, atmo.moonDir.y) * (1.0 - 0.85 * atmo.rainStrength);
+    sky += vec3(0.75, 0.84, 1.0) * (1.4 * moonDisc * moonShow);
+
+#ifdef CLOUDS_ENABLED
+    if (viewDir.y > 0.015) {
+        float domeInvY = 1.0 / (viewDir.y + 0.09);
+        vec2 cloudPos = cameraPos.xz * 0.0022 + viewDir.xz * (1.28 * domeInvY) + vec2(timeSec * 0.0075, timeSec * 0.0024);
+        float density = cloudShapeShadow(cloudPos);
+        float coverage = mix(0.54, 0.37, atmo.rainStrength);
+        float alpha = smoothstep(coverage, coverage + 0.10, density);
+        if (alpha > 0.001) {
+            vec2 sunStep = normalize(atmo.shadowLightDir.xz + vec2(1e-4)) * 0.090;
+            float sFar = cloudShapeShadow(cloudPos + sunStep);
+            float selfLit = clamp01(0.74 - (sFar - density) * 3.8);
+            vec3 litColor = atmo.directLightColor * 0.78 + atmo.ambientSkyColor * 2.45;
+            vec3 darkColor = mix(atmo.ambientSkyColor * 1.25, atmo.horizonColor * 0.32, 0.45);
+            vec3 cloudColor = mix(darkColor, litColor, selfLit);
+            float horizonFade = smoothstep(0.015, 0.18, viewDir.y);
+            cloudColor = mix(atmo.horizonColor, cloudColor, horizonFade);
+            sky = mix(sky, cloudColor, alpha * horizonFade * 0.92);
+        }
+    }
+#endif
 
     return sky;
 }
@@ -270,7 +380,9 @@ vec3 applyOverworldMediumAndFog(
 ) {
     if (eyeInWater == 1) {
         float waterFog = clamp01(1.0 - exp(-viewDist * 0.065));
-        color = mix(color, vec3(0.02, 0.14, 0.22) * (0.25 + 0.75 * atmo.dayFactor), waterFog);
+        vec3 uwFogColor = (atmo.ambientSkyColor * 0.85 + atmo.directLightColor * 0.18) * vec3(0.28, 0.78, 0.92)
+                        + vec3(0.004, 0.014, 0.022);
+        color = mix(color, uwFogColor, waterFog);
     } else if (eyeInWater == 2) {
         color = mix(color, vec3(1.10, 0.28, 0.04), clamp01(1.0 - exp(-viewDist * 0.45)));
     } else if (eyeInWater == 3) {

@@ -12,12 +12,16 @@
 #if defined(VERTEX_SHADER)
 
 uniform mat4 gbufferModelViewInverse;
+uniform mat4 gbufferProjectionInverse;
 uniform mat4 shadowModelView;
 uniform mat4 shadowProjection;
 uniform vec3 sunPosition;
 uniform vec3 shadowLightPosition;
 uniform float rainStrength;
 
+out vec3 vWorldRay;
+flat out vec3 vCameraOffset;
+flat out vec2 vDepthCoeff;
 flat out vec4 vAtmoZenith;
 flat out vec4 vAtmoHorizon;
 flat out vec4 vAtmoMie;
@@ -32,15 +36,25 @@ flat out vec4 vShadowC2;
 flat out vec4 vShadowC3;
 
 void main() {
+    vec4 clipPos = gl_ModelViewProjectionMatrix * gl_Vertex;
+    vec2 ndcXY = clipPos.xy / clipPos.w;
+    vec3 viewRay = vec3(
+        ndcXY.x * gbufferProjectionInverse[0][0],
+        ndcXY.y * gbufferProjectionInverse[1][1],
+        -1.0
+    );
+    vWorldRay = mat3(gbufferModelViewInverse) * viewRay;
+    vCameraOffset = gbufferModelViewInverse[3].xyz;
+    vDepthCoeff = vec2(
+        2.0 * gbufferProjectionInverse[2][3],
+        gbufferProjectionInverse[3][3] - gbufferProjectionInverse[2][3]
+    );
+
     vec3 sunDir = viewDirToWorld(sunPosition, gbufferModelViewInverse);
     vec3 shadowDir = viewDirToWorld(shadowLightPosition, gbufferModelViewInverse);
     AtmosphereState atmo = buildAtmosphere(sunDir, shadowDir, rainStrength);
 
-    vAtmoZenith    = vec4(atmo.zenithColor, atmo.dayFactor);
-    vAtmoHorizon   = vec4(atmo.horizonColor, atmo.sunsetFactor);
-    vAtmoMie       = vec4(atmo.mieColor, atmo.nightFactor);
-    vAtmoDirect    = vec4(atmo.directLightColor, atmo.shadowFade);
-    vAtmoAmbSky    = vec4(atmo.ambientSkyColor, atmo.rainStrength);
+    packAtmosphereVaryings(atmo, vAtmoZenith, vAtmoHorizon, vAtmoMie, vAtmoDirect, vAtmoAmbSky);
     vAtmoAmbGround = atmo.ambientGroundColor;
     vAtmoSunDir    = atmo.sunDir;
     vAtmoShadowDir = atmo.shadowLightDir;
@@ -51,7 +65,7 @@ void main() {
     vShadowC2 = shadowVP[2];
     vShadowC3 = shadowVP[3];
 
-    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+    gl_Position = clipPos;
 }
 
 #elif defined(FRAGMENT_SHADER)
@@ -63,22 +77,19 @@ const bool colortex1Clear = true;
 const bool colortex0MipmapEnabled = false;
 const bool colortex1MipmapEnabled = false;
 const float shadowDistanceRenderMul = 1.0;
-const float entityShadowDistanceMul = 0.30;
+const float entityShadowDistanceMul = 0.25;
 
 uniform sampler2D colortex0;
 uniform sampler2D colortex1;
 uniform sampler2D depthtex0;
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 uniform sampler2DShadow shadowtex0;
-
-uniform mat4 gbufferModelViewInverse;
-uniform mat4 gbufferProjectionInverse;
+#endif
 
 uniform vec3 cameraPosition;
 uniform vec3 fogColor;
 uniform float frameTimeCounter;
 uniform float far;
-uniform float viewWidth;
-uniform float viewHeight;
 uniform float nightVision;
 uniform float blindness;
 uniform float darknessFactor;
@@ -86,6 +97,9 @@ uniform int isEyeInWater;
 uniform int heldBlockLightValue;
 uniform int heldBlockLightValue2;
 
+in vec3 vWorldRay;
+flat in vec3 vCameraOffset;
+flat in vec2 vDepthCoeff;
 flat in vec4 vAtmoZenith;
 flat in vec4 vAtmoHorizon;
 flat in vec4 vAtmoMie;
@@ -104,31 +118,18 @@ layout(location = 0) out vec4 outColor0;
 
 void main() {
     ivec2 texel = ivec2(gl_FragCoord.xy);
-    vec2 screenUV = gl_FragCoord.xy / vec2(viewWidth, viewHeight);
     float depth = texelFetch(depthtex0, texel, 0).r;
 
 #if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
-    AtmosphereState atmo;
-    atmo.sunDir = vAtmoSunDir;
-    atmo.moonDir = -vAtmoSunDir;
-    atmo.shadowLightDir = vAtmoShadowDir;
-    atmo.dayFactor = vAtmoZenith.a;
-    atmo.sunsetFactor = vAtmoHorizon.a;
-    atmo.nightFactor = vAtmoMie.a;
-    atmo.rainStrength = vAtmoAmbSky.a;
-    atmo.shadowFade = vAtmoDirect.a;
-    atmo.zenithColor = vAtmoZenith.rgb;
-    atmo.horizonColor = vAtmoHorizon.rgb;
-    atmo.mieColor = vAtmoMie.rgb;
-    atmo.directLightColor = vAtmoDirect.rgb;
-    atmo.ambientSkyColor = vAtmoAmbSky.rgb;
-    atmo.ambientGroundColor = vAtmoAmbGround;
+    AtmosphereState atmo = unpackAtmosphereVaryings(
+        vAtmoZenith, vAtmoHorizon, vAtmoMie, vAtmoDirect,
+        vAtmoAmbSky, vAtmoAmbGround, vAtmoSunDir, vAtmoShadowDir
+    );
 #endif
 
-    // Sky early-out: skips colortex0, colortex1, shadowtex0, and full feetPos projection!
+    // Sky early-out: skips colortex0, colortex1, shadowtex0, and linearZ decode!
     if (depth >= 0.999999) {
-        vec4 farView = gbufferProjectionInverse * vec4(screenUV * 2.0 - 1.0, 1.0, 1.0);
-        vec3 viewDir = normalize(mat3(gbufferModelViewInverse) * (farView.xyz / farView.w));
+        vec3 viewDir = normalize(vWorldRay);
         vec3 skyColor;
 #if defined(DIMENSION_NETHER)
         skyColor = srgbToLinear(fogColor) * 0.45 + vec3(0.08, 0.025, 0.012);
@@ -153,8 +154,8 @@ void main() {
         return;
     }
 
-    vec3 viewPos = reconstructViewPos(screenUV, depth, gbufferProjectionInverse);
-    vec3 feetPos = viewToFeetPos(viewPos, gbufferModelViewInverse);
+    float linearZ = 1.0 / (vDepthCoeff.x * depth + vDepthCoeff.y);
+    vec3 feetPos = vWorldRay * linearZ + vCameraOffset;
     float viewDist = length(feetPos);
     vec3 viewDir = feetPos / max(viewDist, 1e-4);
 
@@ -190,21 +191,26 @@ void main() {
     float endFog = clamp01(1.0 - exp(-viewDist * 0.008 * FOG_DENSITY));
     lit = mix(lit, evalEndSky(viewDir, frameTimeCounter), endFog);
 #else
-    mat4 shadowVP = mat4(vShadowC0, vShadowC1, vShadowC2, vShadowC3);
-    float NdotL = dot(worldNormal, atmo.shadowLightDir);
-    bool isFoliage = (matId == MAT_FOLIAGE);
-    lin.shadowFactor = sampleShadowMap(
-        shadowtex0,
-        feetPos,
-        worldNormal,
-        NdotL,
-        shadowVP,
-        shadowDistance,
-        float(shadowMapResolution),
-        gl_FragCoord.xy,
-        atmo.shadowFade,
-        isFoliage
-    );
+    // Skip shadow sampling completely inside sealed caves (skyLight <= 0.02)
+    if (skyLight <= 0.02) {
+        lin.shadowFactor = 0.0;
+    } else {
+        mat4 shadowVP = mat4(vShadowC0, vShadowC1, vShadowC2, vShadowC3);
+        float NdotL = dot(worldNormal, atmo.shadowLightDir);
+        bool isFoliage = (matId == MAT_FOLIAGE);
+        lin.shadowFactor = sampleShadowMap(
+            shadowtex0,
+            feetPos,
+            worldNormal,
+            NdotL,
+            shadowVP,
+            shadowDistance,
+            float(shadowMapResolution),
+            gl_FragCoord.xy,
+            atmo.shadowFade,
+            isFoliage
+        );
+    }
 
     vec3 lit = shadeOverworldSurface(lin, atmo);
     lit = applyOverworldMediumAndFog(

@@ -21,16 +21,7 @@ void main() {
 
 #else
 
-#include "/lib/waving.glsl"
-
-uniform mat4 shadowModelView;
-uniform mat4 shadowModelViewInverse;
-uniform vec3 cameraPosition;
-uniform float frameTimeCounter;
-uniform float rainStrength;
-
 in vec4 mc_Entity;
-in vec2 mc_midTexCoord;
 
 out vec2 vUv;
 
@@ -42,27 +33,17 @@ void main() {
 #else
     int blockId = int(mc_Entity.x + 0.5);
 
-    // Cull water from shadow map so sunlight reaches seafloor & no shadowtex1 copy is needed
+    // Cull water from shadow pass so sunlight reaches seafloor & no shadowtex1 copy is needed.
+    // Foliage stays steady in shadow pass so thin cutouts don't crawl across shadow texels.
     if (blockId == BLOCK_WATER) {
         vUv = vec2(0.0);
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
         return;
     }
 
+    // Canopy leaves remain steady in shadow pass so 1-pixel alpha cutouts don't crawl across texels
     vUv = (gl_TextureMatrix[0] * gl_MultiTexCoord0).xy;
-    vec4 shadowViewPos = gl_ModelViewMatrix * gl_Vertex;
-
-  #ifdef WAVE_ANIMATION
-    if (blockId == BLOCK_FOLIAGE_GROUND || blockId == BLOCK_FOLIAGE_CANOPY) {
-        vec3 feetPos = (shadowModelViewInverse * shadowViewPos).xyz;
-        vec3 worldMod64 = getWorldPosMod64(feetPos, cameraPosition);
-        float isTop = clamp((mc_midTexCoord.y - gl_MultiTexCoord0.y) * 32.0, 0.0, 1.0);
-        vec3 wave = calcWavingOffset(worldMod64, blockId, isTop, frameTimeCounter, rainStrength);
-        shadowViewPos.xyz += mat3(shadowModelView) * wave;
-    }
-  #endif
-
-    gl_Position = distortShadowClip(gl_ProjectionMatrix * shadowViewPos);
+    gl_Position = distortShadowClip(gl_ModelViewProjectionMatrix * gl_Vertex);
 #endif
 }
 

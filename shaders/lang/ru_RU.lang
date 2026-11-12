@@ -1,8 +1,9 @@
 # Russian localization for Iris Shader Options
 option.SHADOW_SAMPLES=Качество теней (выборки PCF)
-option.SHADOW_SAMPLES.comment=Количество аппаратных 2x2 PCF выборок на пиксель. 1 = Макс. FPS, 2 = Баланс, 4 = Мягкие.
+option.SHADOW_SAMPLES.comment=Количество аппаратных 2x2 PCF выборок на пиксель. 1 = Макс. FPS, 2 = Быстро, 3 = Сглаженные (Рекомендуется), 4 = Мягкие.
 option.SHADOW_SAMPLES.1=1 выборка (Ультра FPS)
-option.SHADOW_SAMPLES.2=2 выборки (Баланс)
+option.SHADOW_SAMPLES.2=2 выборки (Быстро)
+option.SHADOW_SAMPLES.3=3 выборки (Сглаженные)
 option.SHADOW_SAMPLES.4=4 выборки (Мягкие)
 
 option.shadowMapResolution=Разрешение карты теней

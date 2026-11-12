@@ -39,16 +39,16 @@ vec3 evalDynamicHandlight(vec3 feetPos, vec3 worldNormal, float handLightLevel) 
     float atten = 1.0 / (1.0 + 0.16 * distSq);
     float falloff = smoothstep(radius, radius * 0.25, sqrt(distSq));
     float wrapNdotL = 0.35 + 0.65 * max(dot(worldNormal, toEye), 0.0);
-    return vec3(1.15, 0.62, 0.24) * (handLightLevel * atten * falloff * wrapNdotL * 1.45);
+    return vec3(1.02, 0.62, 0.16) * (handLightLevel * atten * falloff * wrapNdotL * 0.95);
 #endif
 }
 
 vec3 evalBlockLight(float blockLight) {
-    // Rich warm amber-orange falloff; gently brightens toward core
+    // Muted warm golden-yellow torch falloff without white highlight blowout
     float b = clamp01(blockLight);
-    float curve = b * b * (1.0 + 1.15 * b);
-    vec3 warmCore = mix(vec3(1.00, 0.48, 0.14), vec3(1.25, 0.85, 0.52), b * b);
-    return warmCore * (curve * 1.65);
+    float curve = b * b * (0.75 + 0.55 * b);
+    vec3 warmYellow = mix(vec3(1.00, 0.54, 0.10), vec3(1.05, 0.70, 0.22), b * b);
+    return warmYellow * (curve * 0.95);
 }
 
 vec3 shadeOverworldSurface(LightingInputs inData, AtmosphereState atmo) {
@@ -66,7 +66,11 @@ vec3 shadeOverworldSurface(LightingInputs inData, AtmosphereState atmo) {
         ? clamp((rawNdotL + 0.38) / 1.38, 0.0, 1.0)
         : clamp01(rawNdotL);
 
-    float shadow = mix(1.0, inData.shadowFactor, atmo.shadowFade);
+    // Gate direct sun/moon irradiance by skyLight so sealed caves never leak sunlight
+    // through back-face culled shadow chunks, block corners, or unshadowed forward passes.
+    float skyVis = inData.skyLight * sqrt(max(inData.skyLight, 0.0));
+    float skyLightMask = smoothstep(0.02, 0.28, inData.skyLight);
+    float shadow = mix(1.0, inData.shadowFactor, atmo.shadowFade) * skyLightMask;
     vec3 direct = atmo.directLightColor * (NdotL * shadow);
 
     // Backlit foliage subsurface scattering (warm translucent leaf glow)
@@ -77,7 +81,6 @@ vec3 shadeOverworldSurface(LightingInputs inData, AtmosphereState atmo) {
     }
 
     // Hemisphere sky ambient + subtle directional bounce contrast so shadow walls read 3D
-    float skyVis = inData.skyLight * sqrt(max(inData.skyLight, 0.0));
     float hemi = N.y * 0.5 + 0.5;
     vec3 skyBounce = mix(atmo.ambientGroundColor, atmo.ambientSkyColor, hemi);
     float sunBounce = 0.85 + 0.15 * clamp(dot(N, vec3(-L.x, 0.4, -L.z)), -1.0, 1.0);
@@ -91,7 +94,8 @@ vec3 shadeOverworldSurface(LightingInputs inData, AtmosphereState atmo) {
     }
 
     // Block light + dynamic handlight
-    vec3 torch = evalBlockLight(inData.blockLight) + evalDynamicHandlight(inData.feetPos, N, inData.handLightLevel);
+    vec3 torch = evalBlockLight(inData.blockLight)
+               + evalDynamicHandlight(inData.feetPos, N, inData.handLightLevel);
     // Slightly soften direct sunlight shadow contrast where torch dominates
     vec3 totalLight = direct + ambient + torch;
 
@@ -128,7 +132,8 @@ vec3 shadeNetherOrEndSurface(LightingInputs inData, bool isEnd) {
         : mix(vec3(0.18, 0.06, 0.04), vec3(0.32, 0.13, 0.08), hemi);
     amb += vec3(0.20) * inData.nightVision;
 
-    vec3 torch = evalBlockLight(inData.blockLight) + evalDynamicHandlight(inData.feetPos, N, inData.handLightLevel);
+    vec3 torch = evalBlockLight(inData.blockLight)
+               + evalDynamicHandlight(inData.feetPos, N, inData.handLightLevel);
     vec3 color = inData.albedoLinear * (amb + torch);
 
     if (inData.matId == MAT_EMISSIVE) {
