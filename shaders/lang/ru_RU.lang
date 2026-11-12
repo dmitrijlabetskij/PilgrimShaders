@@ -19,6 +19,8 @@ option.WAVE_ANIMATION=Анимация травы и воды
 option.WAVE_ANIMATION.comment=Колыхание листвы, травы и поверхности воды в вершинном шейдере.
 option.DYNAMIC_HANDLIGHT=Динамический свет в руке
 option.DYNAMIC_HANDLIGHT.comment=Освещение окружения от факела или светящегося блока в руке.
+option.GOD_RAYS=Экранные лучи (God Rays)
+option.GOD_RAYS.comment=Лёгкие солнечные лучи по буферу глубины, работающие в том числе под водой.
 
 option.TONEMAP_MODE=Кривая тонмаппинга
 option.TONEMAP_MODE.0=AgX (Естественный)

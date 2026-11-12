@@ -19,6 +19,8 @@ option.WAVE_ANIMATION=Waving Foliage & Water
 option.WAVE_ANIMATION.comment=Pure ALU vertex wind animation for grass, leaves, and water.
 option.DYNAMIC_HANDLIGHT=Dynamic Handlight
 option.DYNAMIC_HANDLIGHT.comment=Illuminates surroundings when holding torches or light blocks.
+option.GOD_RAYS=Screen-Space God Rays
+option.GOD_RAYS.comment=Cheap depth-based sun shafts that also shine underwater.
 
 option.TONEMAP_MODE=Tonemapping Curve
 option.TONEMAP_MODE.0=AgX (Filmic)

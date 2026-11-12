@@ -5,11 +5,11 @@
 #include "/lib/math.glsl"
 
 // =============================================================================
-// Ultra-Lightweight Distorted Shadow Mapping
+// Ultra-Lightweight Distorted Shadow Mapping with Blocker-Aware PCSS
 // - Radial clip-space distortion concentrates ~70% texels near player
-// - Only 1 shadow texture (shadowtex0), NO shadowcolor buffers
+// - shadowtex0 (HW 2x2 PCF) + shadowtex1 (blocker distance -> realistic soft penumbra)
 // - Adaptive normal-offset bias scaled by local distorted texel size
-// - Hardware 2x2 PCF via sampler2DShadow with IGN-rotated 1/2/4-tap Vogel offsets
+// - Hardware 2x2 PCF via sampler2DShadow with IGN-rotated Vogel offsets (up to 8 taps for tall/high casters)
 // =============================================================================
 
 float getShadowDistortFactor(vec2 clipXY) {
@@ -25,6 +25,7 @@ vec4 distortShadowClip(vec4 clipPos) {
 
 float sampleShadowMap(
     sampler2DShadow shadowTex,
+    sampler2D shadowDepthTex,
     vec3 feetPos,
     vec3 worldNormal,
     float NdotL,
@@ -51,9 +52,9 @@ float sampleShadowMap(
     float distortFactor = mix(1.0, radialDist, SHADOW_DISTORTION);
     float texelWorldSize = (2.0 * shadowDist / shadowRes) * distortFactor;
 
-    // Normal-offset bias strictly larger than PCF radius so slopes never self-shadow,
+    // Normal-offset bias paired with PCF radius so slopes never self-shadow,
     // without pushing past thin walls or indoor block corners.
-    float biasScale = isFoliage ? 1.25 : (0.95 + 0.85 * (1.0 - max(NdotL, 0.0)));
+    float biasScale = isFoliage ? 1.55 : (1.35 + 1.25 * (1.0 - max(NdotL, 0.0)));
     vec3 normalClipDelta = mat3(shadowVP) * (worldNormal * (texelWorldSize * biasScale));
     vec4 shadowClip = vec4(unbiasedClip.xyz + normalClipDelta, unbiasedClip.w);
     shadowClip.xy /= distortFactor;
@@ -65,15 +66,17 @@ float sampleShadowMap(
     }
 
     // Receiver Z bias scaled by distortion factor to eliminate grazing acne
-    shadowUV.z -= 0.00065 * distortFactor;
+    shadowUV.z -= 0.00095 * distortFactor;
 
-    // Compact filter radius paired with hardware 2x2 PCF: crisp shadows without hollow-ring halos
-    float radius = mix(0.78, 0.45, distortFactor) / shadowRes;
-
-    float visibility = 0.0;
+    // Balanced contact penumbra: crisp near ground/feet (~5.5cm), gently widening with caster height (PCSS)
+    float worldPenumbra = mix(0.055, 0.12, smoothstep(0.05, 0.70, radialDist));
+    float invRes = 1.0 / shadowRes;
+    float visibility = 1.0;
     float noise = ign(fragCoord);
+
 #if SHADOW_SAMPLES == 1
-    vec2 jitter = (vec2(noise, fract(noise * 17.0)) - 0.5) * (0.45 / shadowRes);
+    float r1 = clamp(worldPenumbra / max(texelWorldSize, 1e-4) * 0.50, 0.55, 0.95) * invRes;
+    vec2 jitter = (vec2(noise, fract(noise * 17.0)) - 0.5) * (2.0 * r1);
     visibility = texture(shadowTex, vec3(shadowUV.xy + jitter, shadowUV.z));
 #else
     float angle = noise * TAU;
@@ -81,44 +84,80 @@ float sampleShadowMap(
     float c = cos(angle);
     mat2 rot = mat2(c, -s, s, c);
 
+    // Sparse blocker search in shadowtex1 (center + 3 triangle probes on sunlit borders).
+    // Early-skips PCF sampling completely on open sunlit terrain.
+    float minBlocker = textureLod(shadowDepthTex, shadowUV.xy, 0.0).r;
+    if (minBlocker >= shadowUV.z) {
+        float wideR = clamp(0.28 / max(texelWorldSize, 1e-4), 2.5, 8.0) * invRes;
+        float d1 = textureLod(shadowDepthTex, shadowUV.xy + (rot * vec2( 0.00,  0.42)) * wideR, 0.0).r;
+        float d2 = textureLod(shadowDepthTex, shadowUV.xy + (rot * vec2(-0.78, -0.45)) * wideR, 0.0).r;
+        float d3 = textureLod(shadowDepthTex, shadowUV.xy + (rot * vec2( 0.78, -0.45)) * wideR, 0.0).r;
+        minBlocker = min(min(minBlocker, d1), min(d2, d3));
+    }
+
+    if (minBlocker < shadowUV.z) {
+        float uvZPerBlock = 0.25 * length(vec3(shadowVP[0][2], shadowVP[1][2], shadowVP[2][2]));
+        float casterDist = (shadowUV.z - minBlocker) / max(uvZPerBlock, 1e-5);
+
+        // Keep standing/low objects sharp; widen penumbra cleanly above ~2.5 blocks height up to 0.32 blocks
+        float pcssPenumbra = clamp(worldPenumbra + max(casterDist - 2.5, 0.0) * 0.011, worldPenumbra, 0.32);
+        float texelRadius = pcssPenumbra / max(texelWorldSize, 1e-4);
+        float radialJitter = 0.82 + 0.36 * fract(noise * 13.73);
+
+        visibility = 0.0;
+        if (texelRadius > 3.2) {
+            // High casters (e.g. flying player): 8-tap Vogel disk softens silhouette without mushiness
+            float radius = clamp(texelRadius, 3.2, 8.0) * invRes;
+            const vec2 wideOffsets[8] = vec2[8](
+                vec2( 0.250000,  0.000000),
+                vec2(-0.319000,  0.292000),
+                vec2( 0.049000, -0.556000),
+                vec2( 0.440000,  0.490000),
+                vec2(-0.740000, -0.055000),
+                vec2( 0.530000, -0.630000),
+                vec2(-0.105000,  0.880000),
+                vec2(-0.620000, -0.740000)
+            );
+            for (int i = 0; i < 8; i++) {
+                visibility += texture(shadowTex, vec3(shadowUV.xy + (rot * wideOffsets[i]) * (radius * radialJitter), shadowUV.z));
+            }
+            visibility *= 0.125;
+        } else {
   #if SHADOW_SAMPLES == 2
-    // Filled asymmetric 2-tap (center-biased + outer) avoids 2-point gaps
-    const vec2 offsets[2] = vec2[2](vec2(0.32, 0.14), vec2(-0.74, -0.32));
-    for (int i = 0; i < 2; i++) {
-        visibility += texture(shadowTex, vec3(shadowUV.xy + (rot * offsets[i]) * radius, shadowUV.z));
-    }
-    visibility *= 0.5;
+            const int SHADOW_TAP_COUNT = 2;
+            float radius = clamp(texelRadius, 0.90, 2.00) * invRes;
+            const vec2 offsets[2] = vec2[2](vec2(0.32, 0.14), vec2(-0.74, -0.32));
   #elif SHADOW_SAMPLES == 3
-    // 3-tap Vogel spiral fills interior -> edge smoothly (12 HW PCF taps, zero hollow rings)
-    const vec2 offsets[3] = vec2[3](
-        vec2( 0.408248,  0.000000),
-        vec2(-0.521300,  0.477460),
-        vec2( 0.080160, -0.909350)
-    );
-    for (int i = 0; i < 3; i++) {
-        visibility += texture(shadowTex, vec3(shadowUV.xy + (rot * offsets[i]) * radius, shadowUV.z));
-    }
-    visibility *= (1.0 / 3.0);
+            const int SHADOW_TAP_COUNT = 3;
+            float radius = clamp(texelRadius, 1.15, 3.20) * invRes;
+            const vec2 offsets[3] = vec2[3](
+                vec2( 0.260000,  0.000000),
+                vec2(-0.440000,  0.408000),
+                vec2( 0.085000, -0.936000)
+            );
   #else
-    // 4-tap Vogel spiral fills interior -> edge smoothly (16 HW PCF taps)
-    const vec2 offsets[4] = vec2[4](
-        vec2( 0.353553,  0.000000),
-        vec2(-0.451400,  0.413500),
-        vec2( 0.053700, -0.788800),
-        vec2( 0.550600,  0.756200)
-    );
-    for (int i = 0; i < 4; i++) {
-        visibility += texture(shadowTex, vec3(shadowUV.xy + (rot * offsets[i]) * radius, shadowUV.z));
-    }
-    visibility *= 0.25;
+            const int SHADOW_TAP_COUNT = 4;
+            float radius = clamp(texelRadius, 1.35, 3.20) * invRes;
+            const vec2 offsets[4] = vec2[4](
+                vec2( 0.240000,  0.000000),
+                vec2(-0.370000,  0.336000),
+                vec2( 0.050000, -0.748000),
+                vec2( 0.580000,  0.790000)
+            );
   #endif
+            for (int i = 0; i < SHADOW_TAP_COUNT; i++) {
+                visibility += texture(shadowTex, vec3(shadowUV.xy + (rot * offsets[i]) * (radius * radialJitter), shadowUV.z));
+            }
+            visibility *= (1.0 / float(SHADOW_TAP_COUNT));
+        }
+    }
 #endif
 
-    // Gentle terminator smoothing on grazing angles and fade out at shadowDistance border
+    // Gentle terminator smoothing on grazing angles and wide fade out at shadowDistance border
     if (!isFoliage) {
         visibility *= smoothstep(0.0, 0.08, NdotL);
     }
-    float edgeFade = smoothstep(0.84, 0.995, radialDist);
+    float edgeFade = smoothstep(0.78, 0.995, radialDist);
     return mix(visibility, 1.0, edgeFade);
 }
 

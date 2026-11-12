@@ -15,7 +15,7 @@
 // - Analytical sky/cloud/sun/moon Fresnel reflections + 2-lobe specular glint
 // =============================================================================
 
-// Returns world-space perturbed normal for realistic water ripples
+// MakeUp-UltraFast-inspired silky multi-angle C2 ripples (3 rotated torus layers, 0 textures)
 vec3 calcWaterNormal(
     vec3 worldPosMod64,
     vec3 baseNormal,
@@ -28,20 +28,28 @@ vec3 calcWaterNormal(
         return baseNormal;
     }
 
-    // Two scrolling anisotropic layers (non-square cells break grid symmetry)
-    vec2 pBroad = worldPosMod64.xz * vec2(0.50, 0.25) + vec2(0.32, 0.18) * timeSec;
-    vec3 broad = valueNoise2DGradAniso(pBroad, ivec2(31, 15), ivec2(11, 29));
+    // Three rotated coordinate frames whose 64-block shifts land on exact integer period multiples
+    const mat2 m1 = mat2(0.50,  0.25, -0.25, 0.50); // +26.6 deg, period 16
+    const mat2 m2 = mat2(1.00, -0.50,  0.50, 1.00); // -26.6 deg, period 32
+    const mat2 m3 = mat2(1.50,  1.00, -1.00, 1.50); // +33.7 deg, period 32
 
-    vec2 pFine = worldPosMod64.xz * vec2(0.50, 1.00) + vec2(-0.26, 0.44) * timeSec;
-    vec3 fine = valueNoise2DGradAniso(pFine, ivec2(31, 63), ivec2(73, 137));
+    vec2 p1 = m1 * worldPosMod64.xz + vec2(0.28, 0.16) * timeSec;
+    vec3 w1 = valueNoise2DGradAniso(p1, ivec2(15, 15), ivec2(11, 29));
 
-    // Smoothly attenuate high-frequency ripples with distance to avoid horizon aliasing
-    float detailFade = 1.0 / (1.0 + viewDist * 0.032);
+    vec2 p2 = m2 * worldPosMod64.xz + vec2(-0.34, 0.24) * timeSec;
+    vec3 w2 = valueNoise2DGradAniso(p2, ivec2(31, 31), ivec2(73, 137));
+
+    vec2 p3 = m3 * worldPosMod64.xz + vec2(0.46, -0.38) * timeSec;
+    vec3 w3 = valueNoise2DGradAniso(p3, ivec2(31, 31), ivec2(191, 59));
+
+    // Distance-attenuated fine ripples avoid horizon shimmer while preserving silky liquid swells
+    float detailFade = 1.0 / (1.0 + viewDist * 0.036);
     float rainBoost = 1.0 + 0.55 * rainStrength;
 
-    vec2 gradBroad = broad.yz * vec2(0.50, 0.25);
-    vec2 gradFine  = fine.yz  * vec2(0.50, 1.00) * detailFade;
-    vec2 totalGrad = (gradBroad * 0.14 + gradFine * 0.065) * (rainBoost * flatWeight);
+    vec2 g1 = vec2(dot(m1[0], w1.yz), dot(m1[1], w1.yz));
+    vec2 g2 = vec2(dot(m2[0], w2.yz), dot(m2[1], w2.yz));
+    vec2 g3 = vec2(dot(m3[0], w3.yz), dot(m3[1], w3.yz)) * detailFade;
+    vec2 totalGrad = (g1 * 0.12 + g2 * 0.055 + g3 * 0.022) * (rainBoost * flatWeight);
 
     return normalize(vec3(-totalGrad.x, baseNormal.y, -totalGrad.y));
 }

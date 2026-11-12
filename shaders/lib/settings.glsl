@@ -20,6 +20,7 @@ const bool shadowtex0HardwareFiltering = true;
 #define CLOUDS_ENABLED
 #define WAVE_ANIMATION
 #define DYNAMIC_HANDLIGHT
+#define GOD_RAYS
 
 // --- Color & Atmosphere ---
 #define TONEMAP_MODE 0            // [0 1]  0 = AgX (Filmic), 1 = ACES (Vibrant)

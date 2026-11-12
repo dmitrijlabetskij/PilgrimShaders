@@ -107,6 +107,7 @@ void main() {
 uniform sampler2D gtexture;
 #if defined(FORWARD_SHADOWS) && !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 uniform sampler2DShadow shadowtex0;
+uniform sampler2D shadowtex1;
 #endif
 #ifdef GBUFFER_ENTITY
 uniform vec4 entityColor;
@@ -248,6 +249,7 @@ void main() {
     mat4 shadowVP = mat4(vShadowC0, vShadowC1, vShadowC2, vShadowC3);
     lin.shadowFactor = sampleShadowMap(
         shadowtex0,
+        shadowtex1,
         vFeetPos,
         lin.worldNormal,
         dot(lin.worldNormal, atmo.shadowLightDir),

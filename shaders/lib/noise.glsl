@@ -37,13 +37,15 @@ float valueNoise2D(vec2 p) {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-// Anisotropic periodic 2D value noise + analytical gradient: vec3(val, ddx, ddz).
-// Separate X/Z period masks wrap seamlessly on 64-block world coordinates.
+// C2-continuous quintic periodic 2D value noise + analytical gradient: vec3(val, ddx, ddz).
+// Eliminates cubic crease lines in mirror-like water reflections while wrapping on 64-block torus.
 vec3 valueNoise2DGradAniso(vec2 p, ivec2 periodMask, ivec2 seedOffset) {
     vec2 i = floor(p);
     vec2 f = p - i;
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    vec2 du = 6.0 * f * (1.0 - f);
+    vec2 f2 = f * f;
+    vec2 f1 = f - 1.0;
+    vec2 u = f2 * f * (f * (f * 6.0 - 15.0) + 10.0);
+    vec2 du = 30.0 * f2 * (f1 * f1);
 
     ivec2 ip0 = ivec2(i);
     ivec2 p00 = (ip0 & periodMask) + seedOffset;

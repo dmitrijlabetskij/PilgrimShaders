@@ -83,8 +83,8 @@ def validate_iris_shaders(tmp_dir: pathlib.Path) -> int:
     # Also test key setting permutations on deferred & water passes
     variants = [
         {"SHADOW_SAMPLES": "1", "TONEMAP_MODE": "1"},
-        {"SHADOW_SAMPLES": "2"},
-        {"SHADOW_SAMPLES": "4", "CLOUDS_ENABLED": "UNDEF", "WAVE_ANIMATION": "UNDEF", "DYNAMIC_HANDLIGHT": "UNDEF"},
+        {"SHADOW_SAMPLES": "2", "MC_RENDER_STAGE_ENTITIES": "12"},
+        {"SHADOW_SAMPLES": "4", "CLOUDS_ENABLED": "UNDEF", "WAVE_ANIMATION": "UNDEF", "DYNAMIC_HANDLIGHT": "UNDEF", "GOD_RAYS": "UNDEF"},
     ]
     for idx, defs in enumerate(variants):
         for rel_name, stage in [
@@ -93,6 +93,8 @@ def validate_iris_shaders(tmp_dir: pathlib.Path) -> int:
             ("gbuffers_entities_translucent.fsh", "frag"),
             ("gbuffers_terrain.vsh", "vert"),
             ("shadow.vsh", "vert"),
+            ("shadow.fsh", "frag"),
+            ("final.vsh", "vert"),
             ("final.fsh", "frag"),
         ]:
             p = SHADERS_DIR / rel_name
@@ -119,6 +121,7 @@ def validate_vulkan_portability(tmp_dir: pathlib.Path) -> None:
 #include "/lib/tonemap.glsl"
 
 layout(set = 0, binding = 0) uniform sampler2DShadow uShadowTex;
+layout(set = 0, binding = 2) uniform sampler2D uShadowDepthTex;
 layout(set = 0, binding = 1) uniform FrameUBO {
     mat4 shadowView;
     mat4 shadowProj;
@@ -142,7 +145,7 @@ void main() {
     AtmosphereState atmo = buildAtmosphere(ubo.sunDir, ubo.shadowDir, ubo.rainStrength);
     vec3 viewDir = normalize(inFeetPos + wave + vec3(0.0, 0.0, 1.0));
     float sh = sampleShadowMap(
-        uShadowTex, inFeetPos, decN, dot(decN, atmo.shadowLightDir),
+        uShadowTex, uShadowDepthTex, inFeetPos, decN, dot(decN, atmo.shadowLightDir),
         ubo.shadowProj * ubo.shadowView, 96.0, 1024.0,
         gl_FragCoord.xy, atmo.shadowFade, matId == MAT_FOLIAGE
     );

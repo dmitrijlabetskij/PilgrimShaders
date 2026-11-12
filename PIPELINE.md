@@ -23,7 +23,7 @@
 | `colortex0` | `R11F_G11F_B10F` (4 Б) | Линейное альбедо (до `deferred`), затем линейный HDR-свет | [deferred_pass.glsl](shaders/lib/deferred_pass.glsl#L60) |
 | `colortex1` | `RGBA8` (4 Б) | `.rg` — октаэдрическая нормаль; `.b` — `skyLight` (8 бит); `.a` — 5 бит `sqrt(blockLight)` + `IGN` дизеринг \| 3 бита `matId` (`0..7`) | [packing.glsl](shaders/lib/packing.glsl#L7-L60) |
 | `depthtex0` / `depthtex1` | Depth (4 Б) | Глубина всей сцены / непрозрачной сцены за водой и стеклом | — |
-| `shadowtex0` | Depth (только Overworld) | Единственная карта теней (`shadowcolor*` не выделяется) | [shadows.glsl](shaders/lib/shadows.glsl#L10) |
+| `shadowtex0` / `shadowtex1` | Depth (только Overworld) | Карта теней (HW PCF) + глубина блокера для адаптивной полутени PCSS (`shadowcolor*` не выделяется) | [shadows.glsl](shaders/lib/shadows.glsl#L10) |
 
 ---
 
@@ -31,13 +31,13 @@
 
 ### 2.1. Тени (`shadows.glsl`, `shadow_pass.glsl`, `shaders.properties`)
 * **Разделение геометрии**: сплошные блоки в `shadow_solid.fsh` используют пустой фрагментный шейдер без `texture()` и `discard` (полный аппаратный Early-Z / Hi-Z). Альфа-тест остаётся только в `shadow.fsh` для листвы, травы и вырезных блоков.
-* **Отсечение на уровне настроек**: `shadow.culling = true`, `shadowDistanceRenderMul = 1.0`, `entityShadowDistanceMul = 0.25`, `shadowIntervalSize = 4.0`, отключены тени от block-entities и частиц (`shadowBlockEntities = false`, `shadowParticles = false`). Вода (`BLOCK_WATER`) отбрасывается в `shadow.vsh`, чтобы солнце достигало дна без `shadowtex1`.
+* **Отсечение на уровне настроек**: `shadow.culling = true`, `shadowDistanceRenderMul = 1.0`, `entityShadowDistanceMul = 1.0` (плюс отсечение сущностей и игрока по радиусу 64 блоков в `shadow.fsh` при `MC_RENDER_STAGE_ENTITIES`), `shadowIntervalSize = 4.0`, отключены тени от block-entities и частиц (`shadowBlockEntities = false`, `shadowParticles = false`). Вода (`BLOCK_WATER`) отбрасывается в `shadow.vsh`, чтобы солнце достигало дна без `shadowtex1`.
 * **Измерения без солнца**: в `world-1` (Незер) и `world1` (Энд) `shadowtex0` исключён из объявлений фрагментных шейдеров (`deferred_pass.glsl`, `water_pass.glsl`, `forward_common.glsl`), а вершины `shadow.vsh` отбрасываются за пределы clip-space.
 * **Радиальное искажение**: `distortShadowClip` делит `clipPos.xy` на `mix(1.0, length(clipPos.xy), SHADOW_DISTORTION)` (`0.78`), концентрируя плотность текселей вблизи игрока.
 * **Фильтрация и борьба с артефактами**:
   * Ранний выход при `shadowFade <= 0.001` или `(!isFoliage && NdotL <= 0.0)` и при `skyLight <= 0.02` в пещерах (0 чтений `shadowtex0`).
-  * Адаптивный normal-offset bias в мировом пространстве пропорционально размеру искажённого текселя + depth bias (`0.00065 * distortFactor`).
-  * Компактный диск Фогеля (`SHADOW_SAMPLES`: `1`, `2`, `3` или `4` чтения `sampler2DShadow`, по умолчанию `3` с аппаратным 2×2 PCF = 12 сэмплов) с вращением по пиксельному `IGN` (`ign(fragCoord) * TAU`).
+  * Адаптивный normal-offset bias в мировом пространстве пропорционально размеру искажённого текселя + depth bias (`0.00095 * distortFactor`).
+  * **Адаптивная полутень (PCSS)**: поиск расстояния до блокера в `shadowtex1` (`1` центр + `3` пробы с радиусом до `0.28` блока, ранний выход `1.0` на открытом солнце без PCF). У контакта с землёй (`0.055–0.12` блока) работает компактный диск Фогеля (`SHADOW_SAMPLES`: `1..4`), а выше `2.5` блоков от объекта радиус растёт вплоть до `0.32` блока / `8.0` текселя с расширением до 8 выборок HW 2×2 PCF.
   * В `shadow.vsh` колыхание травы и листвы отключено, чтобы тонкие вырезные тени не мерцали при движении вершин.
 
 ### 2.2. Непрозрачные блоки, растительность, мобы и рука (`gbuffer_common.glsl`, `waving.glsl`, `packing.glsl`)
@@ -73,14 +73,15 @@
 
 ### 2.5. Вода и стекло (`water_pass.glsl`, `water.glsl`)
 * **Вершинные волны**: мягкое вертикальное смещение `BLOCK_WATER` на двух волнах (в `calcWavingOffset`, чуть ниже `y = 1.0`, чтобы не вылезать на берег).
-* **Процедурная рябь (`calcWaterNormal`)**: две анизотропные периодические октавы `valueNoise2DGradAniso` с аналитическим градиентом (без карт нормалей) и затуханием высокочастотной ряби с расстоянием (`detailFade = 1 / (1 + 0.032 * dist)`).
+* **Без ванильной текстуры**: для `BLOCK_WATER` чтение `gtexture` пропущено; цвет основы берётся из гладкого биомного оттенка `vColor.rgb * 0.84`.
+* **Процедурная рябь (`calcWaterNormal`)**: три повёрнутых под разными углами `C2`-непрерывных (квинтических) слоя `valueNoise2DGradAniso` с периодической привязкой к тору `64×64` и аналитическим градиентом (без карт нормалей и сеточных заломов) с затуханием мелкой ряби по дистанции (`detailFade = 1 / (1 + 0.036 * dist)`).
 * **Мутность строго по водному пути**: `waterPathDist = viewDist * max(opaqueLinearZ / vWaterLinearZ - 1.0, 0.0)` через `depthtex1` и предрасчитанный `vDepthCoeff` — полностью исключает расстояние в воздухе и не требует обратных матриц 4×4 в `gbuffers_water.fsh`.
 * **Освещение, отражения и альфа**: заполняющий цвет `waterFill` зависит от прямого/небесного света, теней и блочного света; отражения — Френель Шлика + облегчённая `evalWaterReflectionSky` (градиент, солнце/луна и 2-октавная `cloudShapeShadow` с 1 шагом затенения) + 2-лепестковый солнечный блик (`h64`, `h512` без `pow`); альфа компенсирована под стандартный `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` блендинг.
 * **Стекло, лёд, слайм**: `MAT_SPECULAR` + отражение градиента неба по Френелю.
 
 ### 2.6. Пост-отложенные полупрозрачные проходы и пост-обработка (`forward_common.glsl`, `tonemap.glsl`)
 * **Forward (`gbuffers_entities_translucent`, `block_translucent`, `textured`, `hand_water`, `weather`)**: атмосфера предрасчитывается в вершинном шейдере (`flat out`); карты теней не сэмплируются (`FORWARD_SHADOWS` отключён). Для частиц (`FORWARD_VERTEX_LIT`) свет считается в вершинном шейдере, а во фрагментном остаются текстура, искры и туман; для дождя (`FORWARD_WEATHER`) используется облегчённый путь без PBR-ветки.
-* **Тонмаппинг и вывод (`final_pass.glsl`, `tonemap.glsl`)**: чисто однотекстурный пост-проход (`colortex0`): выбор между `AgX Minimal` и `ACES`, линейная насыщенность `SATURATION`, неразрушающая S-кривая контраста в sRGB и треугольный 8-битный дизеринг `ignCentered / 255.0`.
+* **Экранные лучи и тонмаппинг (`final_pass.glsl`, `tonemap.glsl`)**: при `GOD_RAYS` вне конуса солнца (и в Незере/Энде, ночью, в дождь) выполняется **1 чтение** (`colortex0`), а внутри конуса солнца — 8 `IGN`-дизеризованных шагов (`depthtex0` в воздухе; `depthtex1` + 5-шаговая 3D-проекция волновых колонн с преломлением Снеллиуса под водой). Далее применяется `AgX Minimal` или `ACES`, `SATURATION`, S-кривая контраста в sRGB и треугольный 8-битный дизеринг `ignCentered / 255.0`.
 
 ---
 
@@ -98,12 +99,12 @@
 | **`deferred.fsh` — небо** | **1** (`depthtex0`) | `colortex0` (4 Б) | ~20 ALU (`normalize(vWorldRay)`, градиент + звёзды + диски) + ~70–100 ALU на облаках |
 | **`deferred.fsh` — пещера** (`skyLight ≤ 0.02`) | **3** (`depthtex0`, `colortex0`, `colortex1`) | `colortex0` (4 Б) | ~50 ALU (быстрая `View-Ray` реконструкция, распаковка G-буфера, затенение) |
 | **`deferred.fsh` — улица с тенями** | **3** (G-буфер) + **1 / 2 / 3 / 4** `sampler2DShadow` (по умолч. 3; `0` при `NdotL ≤ 0`) | `colortex0` (4 Б) | ~80–110 ALU (`View-Ray` + `sampleShadowMap` + `shadeOverworldSurface` + туман) |
-| **`gbuffers_water` — вода** | **2** (`gtexture`, `depthtex1`) + **1–4** `shadowtex0` | `colortex0` (4 Б blend) | ~95 ALU (без обратных матриц: `opaqueLinearZ`, `calcWaterNormal`, `evalWaterReflectionSky`, 2-лепестковый блик) |
+| **`gbuffers_water` — вода** | **1** (`depthtex1`, без `gtexture`) + **1–4** `shadowtex0` | `colortex0` (4 Б blend) | ~105 ALU (без обратных матриц: `opaqueLinearZ`, 3-слойная квинтическая `calcWaterNormal`, `evalWaterReflectionSky`, 2-лепестковый блик) |
 | **`gbuffers_water` — стекло/лёд** | **1** (`gtexture`) + **1–4** `shadowtex0` | `colortex0` (4 Б blend) | ~85 ALU (поверхность + градиент неба по Френелю + туман) |
 | **`gbuffers_textured` — частицы** | **1** (`gtexture`) | `colortex0` (4 Б blend) | VS: ~45 ALU/вершина (`FORWARD_VERTEX_LIT`). FS: ~15 ALU (текстура + туман) |
 | **`forward_common` — прозрачные блоки/мобы** | **1** (`gtexture`) | `colortex0` (4 Б blend) | ~50 ALU (атмосфера уже посчитана в VS) |
 | **`gbuffers_weather` — дождь/снег** | **1** (`gtexture`) | `colortex0` (4 Б blend) | ~25 ALU (устойчиво к высокому overdraw) |
-| **`final.fsh`** | **1** (`colortex0`) | Swapchain `RGBA8` (4 Б) | ~50 ALU (`tonemapAgX` или `tonemapACES`, `linearToSrgb`, S-кривая, `IGN`) |
+| **`final.fsh`** | **1** (`colortex0`) вне конуса солнца; **+9** (`1 + 8` `depthtex0`/`depthtex1`) внутри конуса | Swapchain `RGBA8` (4 Б) | ~50 ALU (`AgX`/`ACES`, `linearToSrgb`, S-кривая, `IGN`) + ~25 ALU в конусе `GOD_RAYS` |
 
 ### Итоговая сложность на кадр
 При среднем `SHADOW_SAMPLES = 3`:

@@ -73,7 +73,7 @@ AtmosphereState buildAtmosphere(vec3 sunDir, vec3 shadowLightDir, float rainStre
     vec3 sunDirect = mix(sunLightSunset, sunLightNoon, smoothstep(0.0, 0.32, max(sunY, 0.0)));
     vec3 direct = mix(moonLight, sunDirect, smoothstep(-0.04, 0.08, sunY));
     // Fade direct intensity softly during dawn/dusk shadow-flip transition
-    float lightSwitchFade = smoothstep(0.0, 0.10, atmo.shadowLightDir.y);
+    float lightSwitchFade = smoothstep(0.01, 0.12, atmo.shadowLightDir.y);
     atmo.directLightColor = direct * lightSwitchFade * (1.0 - 0.78 * atmo.rainStrength);
 
     // Hemisphere sky ambient (soft fill at night so moon shadows aren't overly harsh)
@@ -365,6 +365,14 @@ vec3 applyOverworldFog(
     return mix(color, fogColor, fogAmount);
 }
 
+// Shared underwater fog color used identically by deferred sky/unloaded chunks and medium fog
+vec3 evalUnderwaterFogColor(vec3 viewDir, AtmosphereState atmo) {
+    vec3 lightRef = atmo.ambientSkyColor * 0.42 + atmo.directLightColor * 0.055;
+    vec3 baseUw = lightRef * vec3(0.16, 0.52, 0.72) + vec3(0.002, 0.006, 0.012);
+    float vertShade = 1.0 + 0.32 * max(viewDir.y, 0.0) - 0.36 * max(-viewDir.y, 0.0);
+    return baseUw * vertShade;
+}
+
 // Unified medium / blindness fog shared across deferred, water, and forward passes
 vec3 applyOverworldMediumAndFog(
     vec3 color,
@@ -379,9 +387,10 @@ vec3 applyOverworldMediumAndFog(
     float darknessFactor
 ) {
     if (eyeInWater == 1) {
-        float waterFog = clamp01(1.0 - exp(-viewDist * 0.065));
-        vec3 uwFogColor = (atmo.ambientSkyColor * 0.85 + atmo.directLightColor * 0.18) * vec3(0.28, 0.78, 0.92)
-                        + vec3(0.004, 0.014, 0.022);
+        float waterFog = 1.0 - exp(-viewDist * 0.080);
+        float borderFade = smoothstep(0.70, 0.96, viewDist / max(farPlane, 32.0));
+        waterFog = clamp01(max(waterFog, borderFade));
+        vec3 uwFogColor = evalUnderwaterFogColor(viewDir, atmo);
         color = mix(color, uwFogColor, waterFog);
     } else if (eyeInWater == 2) {
         color = mix(color, vec3(1.10, 0.28, 0.04), clamp01(1.0 - exp(-viewDist * 0.45)));

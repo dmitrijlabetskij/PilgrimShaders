@@ -77,13 +77,14 @@ const bool colortex1Clear = true;
 const bool colortex0MipmapEnabled = false;
 const bool colortex1MipmapEnabled = false;
 const float shadowDistanceRenderMul = 1.0;
-const float entityShadowDistanceMul = 0.25;
+const float entityShadowDistanceMul = 1.0;
 
 uniform sampler2D colortex0;
 uniform sampler2D colortex1;
 uniform sampler2D depthtex0;
 #if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 uniform sampler2DShadow shadowtex0;
+uniform sampler2D shadowtex1;
 #endif
 
 uniform vec3 cameraPosition;
@@ -137,7 +138,7 @@ void main() {
         skyColor = evalEndSky(viewDir, frameTimeCounter);
 #else
         if (isEyeInWater == 1) {
-            skyColor = vec3(0.02, 0.14, 0.22) * (0.25 + 0.75 * atmo.dayFactor);
+            skyColor = evalUnderwaterFogColor(viewDir, atmo);
         } else if (isEyeInWater == 2) {
             skyColor = vec3(1.10, 0.28, 0.04);
         } else if (isEyeInWater == 3) {
@@ -200,6 +201,7 @@ void main() {
         bool isFoliage = (matId == MAT_FOLIAGE);
         lin.shadowFactor = sampleShadowMap(
             shadowtex0,
+            shadowtex1,
             feetPos,
             worldNormal,
             NdotL,

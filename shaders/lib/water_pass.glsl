@@ -98,6 +98,7 @@ uniform sampler2D gtexture;
 uniform sampler2D depthtex1;
 #if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 uniform sampler2DShadow shadowtex0;
+uniform sampler2D shadowtex1;
 #endif
 
 uniform vec3 cameraPosition;
@@ -136,8 +137,20 @@ flat in vec4 vShadowC3;
 layout(location = 0) out vec4 outColor0;
 
 void main() {
-    vec4 tex = texture(gtexture, vUv);
-    vec3 albedoLinear = srgbToLinear(tex.rgb * vColor.rgb);
+    // Drop vanilla 16x16 pixelated water texture so ripples and reflections stay silky-clean;
+    // preserve full texture alpha & albedo for stained glass, ice, slime, honey, and portals.
+    vec3 albedoLinear;
+    float glassAlpha = 1.0;
+    if (vIsWater > 0.5) {
+        albedoLinear = srgbToLinear(vColor.rgb * 0.84);
+    } else {
+        vec4 tex = texture(gtexture, vUv);
+        glassAlpha = clamp01(tex.a * vColor.a);
+        if (glassAlpha < 0.004) {
+            discard;
+        }
+        albedoLinear = srgbToLinear(tex.rgb * vColor.rgb);
+    }
 
     vec3 baseNormal = safeNormalize(vWorldNormal, vec3(0.0, 1.0, 0.0));
     if (!gl_FrontFacing) {
@@ -169,7 +182,7 @@ void main() {
     float fogT = clamp01(1.0 - exp(-viewDist * 0.008 * FOG_DENSITY));
     lit = mix(lit, evalEndSky(viewDir, frameTimeCounter), fogT);
   #endif
-    float alpha = (vIsWater > 0.5) ? 0.65 : clamp01(tex.a * vColor.a);
+    float alpha = (vIsWater > 0.5) ? 0.65 : glassAlpha;
     outColor0 = vec4(max(lit, vec3(0.0)), alpha);
 #else
     AtmosphereState atmo = unpackAtmosphereVaryings(
@@ -180,6 +193,7 @@ void main() {
 
     float shadowFactor = sampleShadowMap(
         shadowtex0,
+        shadowtex1,
         vFeetPos,
         baseNormal,
         dot(baseNormal, atmo.shadowLightDir),
@@ -228,10 +242,7 @@ void main() {
         );
     } else {
         // Stained glass, ice, slime, honey, portal: sharp Fresnel sky reflection + clean tint
-        float alpha = clamp01(tex.a * vColor.a);
-        if (alpha < 0.004) {
-            discard;
-        }
+        float alpha = glassAlpha;
         LightingInputs lin;
         lin.albedoLinear = albedoLinear;
         lin.worldNormal = baseNormal;
