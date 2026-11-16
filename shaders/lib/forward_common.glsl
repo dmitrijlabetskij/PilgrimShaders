@@ -15,6 +15,18 @@
 
 #if defined(VERTEX_SHADER)
 
+in vec3 vaPosition;
+in vec4 vaColor;
+in vec3 vaNormal;
+in vec2 vaUV0;
+in ivec2 vaUV2;
+
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+uniform mat4 textureMatrix;
+uniform mat3 normalMatrix;
+uniform vec3 chunkOffset;
+
 uniform mat4 gbufferModelViewInverse;
 #ifdef FORWARD_SHADOWS
 uniform mat4 shadowModelView;
@@ -53,14 +65,15 @@ flat out vec4 vShadowC3;
 #endif
 
 void main() {
-    vUv = (gl_TextureMatrix[0] * gl_MultiTexCoord0).xy;
-    vLm = remapLightmap((gl_TextureMatrix[1] * gl_MultiTexCoord1).xy);
-    vColor = gl_Color;
+    vUv = (textureMatrix * vec4(vaUV0, 0.0, 1.0)).xy;
+    vLm = remapLightmap((TEXTURE_MATRIX_2 * vec4(vaUV2, 0.0, 1.0)).xy);
+    vColor = vaColor;
 
-    vec4 viewPos = gl_ModelViewMatrix * gl_Vertex;
+    vec3 modelPos = vaPosition + chunkOffset;
+    vec4 viewPos = modelViewMatrix * vec4(modelPos, 1.0);
     vFeetPos = (gbufferModelViewInverse * viewPos).xyz;
 
-    vec3 viewNormal = safeNormalize(gl_NormalMatrix * gl_Normal, vec3(0.0, 1.0, 0.0));
+    vec3 viewNormal = safeNormalize(normalMatrix * vaNormal, vec3(0.0, 1.0, 0.0));
     vWorldNormal = safeNormalize(mat3(gbufferModelViewInverse) * viewNormal, vec3(0.0, 1.0, 0.0));
 
     vec3 sunDir = viewDirToWorld(sunPosition, gbufferModelViewInverse);
@@ -99,7 +112,7 @@ void main() {
   #endif
 #endif
 
-    gl_Position = gl_ProjectionMatrix * viewPos;
+    gl_Position = projectionMatrix * viewPos;
 }
 
 #elif defined(FRAGMENT_SHADER)

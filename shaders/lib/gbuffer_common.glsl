@@ -16,6 +16,18 @@
 
 #include "/lib/waving.glsl"
 
+in vec3 vaPosition;
+in vec4 vaColor;
+in vec3 vaNormal;
+in vec2 vaUV0;
+in ivec2 vaUV2;
+
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+uniform mat4 textureMatrix;
+uniform mat3 normalMatrix;
+uniform vec3 chunkOffset;
+
 uniform mat4 gbufferModelView;
 uniform mat4 gbufferModelViewInverse;
 uniform vec3 cameraPosition;
@@ -34,15 +46,15 @@ out vec3 vWorldNormal;
 flat out int vMatId;
 
 void main() {
-    vUv = (gl_TextureMatrix[0] * gl_MultiTexCoord0).xy;
-    vLm = remapLightmap((gl_TextureMatrix[1] * gl_MultiTexCoord1).xy);
-    vColor = gl_Color;
+    vUv = (textureMatrix * vec4(vaUV0, 0.0, 1.0)).xy;
+    vLm = remapLightmap((TEXTURE_MATRIX_2 * vec4(vaUV2, 0.0, 1.0)).xy);
+    vColor = vaColor;
 
     // Terrain chunk normals are already in world space; entities/hand need view->world transform
 #ifdef GBUFFER_TERRAIN
-    vec3 worldNormal = safeNormalize(gl_Normal, vec3(0.0, 1.0, 0.0));
+    vec3 worldNormal = safeNormalize(vaNormal, vec3(0.0, 1.0, 0.0));
 #else
-    vec3 viewNormal = safeNormalize(gl_NormalMatrix * gl_Normal, vec3(0.0, 1.0, 0.0));
+    vec3 viewNormal = safeNormalize(normalMatrix * vaNormal, vec3(0.0, 1.0, 0.0));
     vec3 worldNormal = safeNormalize(mat3(gbufferModelViewInverse) * viewNormal, vec3(0.0, 1.0, 0.0));
 #endif
 
@@ -75,20 +87,21 @@ void main() {
     vWorldNormal = worldNormal;
     vMatId = matId;
 
-    vec4 viewPos = gl_ModelViewMatrix * gl_Vertex;
+    vec3 modelPos = vaPosition + chunkOffset;
+    vec4 viewPos = modelViewMatrix * vec4(modelPos, 1.0);
 
 #if defined(USE_MC_ENTITY) && defined(WAVE_ANIMATION) && !defined(NO_WAVING)
     if (blockId == BLOCK_FOLIAGE_GROUND || blockId == BLOCK_FOLIAGE_CANOPY) {
         vec3 feetPos = (gbufferModelViewInverse * viewPos).xyz;
         vec3 worldMod64 = getWorldPosMod64(feetPos, cameraPosition);
         // Minecraft atlas V runs top (0) -> bottom (1), so UV.y < midTexCoord.y is top half
-        float isTop = clamp((mc_midTexCoord.y - gl_MultiTexCoord0.y) * 32.0, 0.0, 1.0);
+        float isTop = clamp((mc_midTexCoord.y - vaUV0.y) * 32.0, 0.0, 1.0);
         vec3 wave = calcWavingOffset(worldMod64, blockId, isTop, frameTimeCounter, rainStrength);
         viewPos.xyz += mat3(gbufferModelView) * wave;
     }
 #endif
 
-    gl_Position = gl_ProjectionMatrix * viewPos;
+    gl_Position = projectionMatrix * viewPos;
 }
 
 #elif defined(FRAGMENT_SHADER)

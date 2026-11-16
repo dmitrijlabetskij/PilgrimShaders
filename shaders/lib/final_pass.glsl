@@ -10,6 +10,11 @@
 
 #if defined(VERTEX_SHADER)
 
+in vec3 vaPosition;
+
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+
 #if defined(GOD_RAYS) && !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 uniform mat4 gbufferModelViewInverse;
 uniform mat4 gbufferProjection;
@@ -30,7 +35,7 @@ flat out float vRainStrength;
 #endif
 
 void main() {
-    vec4 clipPos = gl_ModelViewProjectionMatrix * gl_Vertex;
+    vec4 clipPos = projectionMatrix * modelViewMatrix * vec4(vaPosition, 1.0);
 #if defined(GOD_RAYS) && !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
     vec2 ndcXY = clipPos.xy / clipPos.w;
     vScreenUV = ndcXY * 0.5 + 0.5;

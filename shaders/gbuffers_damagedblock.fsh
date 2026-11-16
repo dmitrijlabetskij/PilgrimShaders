@@ -1,4 +1,4 @@
-#version 330 compatibility
+#version 330 core
 #define FRAGMENT_SHADER
 #define GBUFFER_COLOR_ONLY
 #define GBUFFER_RAW_ALBEDO

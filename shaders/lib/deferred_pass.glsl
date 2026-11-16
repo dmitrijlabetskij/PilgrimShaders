@@ -11,6 +11,10 @@
 
 #if defined(VERTEX_SHADER)
 
+in vec3 vaPosition;
+
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
 uniform mat4 gbufferModelViewInverse;
 uniform mat4 gbufferProjectionInverse;
 uniform mat4 shadowModelView;
@@ -36,7 +40,7 @@ flat out vec4 vShadowC2;
 flat out vec4 vShadowC3;
 
 void main() {
-    vec4 clipPos = gl_ModelViewProjectionMatrix * gl_Vertex;
+    vec4 clipPos = projectionMatrix * modelViewMatrix * vec4(vaPosition, 1.0);
     vec2 ndcXY = clipPos.xy / clipPos.w;
     vec3 viewRay = vec3(
         ndcXY.x * gbufferProjectionInverse[0][0],

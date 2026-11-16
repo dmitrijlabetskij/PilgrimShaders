@@ -1,4 +1,4 @@
-#version 330 compatibility
+#version 330 core
 #define VERTEX_SHADER
 #define GBUFFER_TERRAIN
 #define USE_MC_ENTITY

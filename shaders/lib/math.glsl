@@ -55,6 +55,14 @@ vec2 remapLightmap(vec2 lmCoord) {
     return clamp01((lmCoord - 0.03125) * (16.0 / 15.0));
 }
 
+// Standard Iris / OptiFine lightmap coordinate transformation matrix (Core Profile)
+const mat4 TEXTURE_MATRIX_2 = mat4(
+    vec4(0.00390625, 0.0, 0.0, 0.0),
+    vec4(0.0, 0.00390625, 0.0, 0.0),
+    vec4(0.0, 0.0, 0.00390625, 0.0),
+    vec4(0.03125, 0.03125, 0.03125, 1.0)
+);
+
 // Schlick Fresnel approximation
 float fresnelSchlick(float cosTheta, float f0) {
     float m = clamp01(1.0 - cosTheta);

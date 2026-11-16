@@ -11,17 +11,31 @@
 
 #ifdef SHADOW_SOLID
 
+in vec3 vaPosition;
+
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+uniform vec3 chunkOffset;
+
 void main() {
 #if defined(DIMENSION_NETHER) || defined(DIMENSION_END)
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 #else
-    gl_Position = distortShadowClip(gl_ModelViewProjectionMatrix * gl_Vertex);
+    vec3 modelPos = vaPosition + chunkOffset;
+    gl_Position = distortShadowClip(projectionMatrix * modelViewMatrix * vec4(modelPos, 1.0));
 #endif
 }
 
 #else
 
+in vec3 vaPosition;
+in vec2 vaUV0;
 in vec4 mc_Entity;
+
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+uniform mat4 textureMatrix;
+uniform vec3 chunkOffset;
 
 #ifdef MC_RENDER_STAGE_ENTITIES
 uniform mat4 shadowModelViewInverse;
@@ -56,13 +70,16 @@ void main() {
         return;
     }
 
+    vec3 modelPos = vaPosition + chunkOffset;
+    vec4 viewPos = modelViewMatrix * vec4(modelPos, 1.0);
+
   #ifdef MC_RENDER_STAGE_ENTITIES
     vIsEntity = (renderStage == MC_RENDER_STAGE_ENTITIES) ? 1 : 0;
-    vEntityFeetPos = (vIsEntity == 1) ? (shadowModelViewInverse * (gl_ModelViewMatrix * gl_Vertex)).xyz : vec3(0.0);
+    vEntityFeetPos = (vIsEntity == 1) ? (shadowModelViewInverse * viewPos).xyz : vec3(0.0);
   #endif
     // Canopy leaves remain steady in shadow pass so 1-pixel alpha cutouts don't crawl across texels
-    vUv = (gl_TextureMatrix[0] * gl_MultiTexCoord0).xy;
-    gl_Position = distortShadowClip(gl_ModelViewProjectionMatrix * gl_Vertex);
+    vUv = (textureMatrix * vec4(vaUV0, 0.0, 1.0)).xy;
+    gl_Position = distortShadowClip(projectionMatrix * viewPos);
 #endif
 }
 
