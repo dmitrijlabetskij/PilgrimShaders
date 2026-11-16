@@ -45,6 +45,9 @@ out vec3 vFeetPos;
 out float vWaterLinearZ;
 flat out vec2 vDepthCoeff;
 flat out float vIsWater;
+flat out float vIsPortal;
+flat out float vIsEmissive;
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 flat out vec4 vAtmoZenith;
 flat out vec4 vAtmoHorizon;
 flat out vec4 vAtmoMie;
@@ -57,6 +60,7 @@ flat out vec4 vShadowC0;
 flat out vec4 vShadowC1;
 flat out vec4 vShadowC2;
 flat out vec4 vShadowC3;
+#endif
 
 void main() {
     vUv = (textureMatrix * vec4(vaUV0, 0.0, 1.0)).xy;
@@ -65,6 +69,8 @@ void main() {
 
     int blockId = int(mc_Entity.x + 0.5);
     vIsWater = (blockId == BLOCK_WATER) ? 1.0 : 0.0;
+    vIsPortal = (blockId == BLOCK_PORTAL) ? 1.0 : 0.0;
+    vIsEmissive = (blockId == BLOCK_EMISSIVE) ? 1.0 : 0.0;
 
     vec3 viewNormal = safeNormalize(normalMatrix * vaNormal, vec3(0.0, 1.0, 0.0));
     vWorldNormal = safeNormalize(mat3(gbufferModelViewInverse) * viewNormal, vec3(0.0, 1.0, 0.0));
@@ -88,6 +94,8 @@ void main() {
         2.0 * gbufferProjectionInverse[2][3],
         gbufferProjectionInverse[3][3] - gbufferProjectionInverse[2][3]
     );
+
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
     vec3 sunDir = viewDirToWorld(sunPosition, gbufferModelViewInverse);
     vec3 shadowDir = viewDirToWorld(shadowLightPosition, gbufferModelViewInverse);
     AtmosphereState atmo = buildAtmosphere(sunDir, shadowDir, rainStrength);
@@ -101,6 +109,7 @@ void main() {
     vShadowC1 = shadowVP[1];
     vShadowC2 = shadowVP[2];
     vShadowC3 = shadowVP[3];
+#endif
     gl_Position = projectionMatrix * viewPos;
 }
 
@@ -132,6 +141,9 @@ in vec3 vFeetPos;
 in float vWaterLinearZ;
 flat in vec2 vDepthCoeff;
 flat in float vIsWater;
+flat in float vIsPortal;
+flat in float vIsEmissive;
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 flat in vec4 vAtmoZenith;
 flat in vec4 vAtmoHorizon;
 flat in vec4 vAtmoMie;
@@ -144,13 +156,61 @@ flat in vec4 vShadowC0;
 flat in vec4 vShadowC1;
 flat in vec4 vShadowC2;
 flat in vec4 vShadowC3;
+#endif
 
 /* RENDERTARGETS: 0 */
 layout(location = 0) out vec4 outColor0;
 
 void main() {
+    float viewDist = length(vFeetPos);
+    vec3 viewDir = vFeetPos / max(viewDist, 1e-4);
+
+    if (vIsPortal > 0.5) {
+        vec4 tex = texture(gtexture, vUv);
+        float baseAlpha = clamp01(tex.a * vColor.a);
+        if (baseAlpha < 0.004) {
+            discard;
+        }
+
+        // Detect animated spiral streaks vs dark void background
+        float luma = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
+        float swirl = smoothstep(0.16, 0.50, luma);
+        float core = smoothstep(0.46, 0.78, luma);
+
+        // Noticeable translucent background veil (0.18) with dense, sharp spirals (up to 0.82)
+        float portalAlpha = mix(0.18, 0.82, swirl) * baseAlpha;
+
+        // Rich royal-violet palette: bright and high-contrast, without eye-straining neon glare
+        vec3 bgTint = vec3(0.035, 0.003, 0.150);
+        vec3 spiralColor = vec3(0.320, 0.028, 0.820);
+        vec3 coreGlow = vec3(0.250, 0.055, 0.450);
+
+        vec3 portalColor = bgTint + spiralColor * swirl + coreGlow * core;
+        // Subtle textural variation preserving animation ripples
+        portalColor *= 0.85 + 0.30 * clamp01(luma);
+
+#if defined(DIMENSION_NETHER)
+        float fogT = clamp01(1.0 - exp(-max(viewDist - 64.0, 0.0) * 0.005 * FOG_DENSITY));
+        portalColor = mix(portalColor, getNetherFogAndSkyColor(fogColor), fogT);
+#elif defined(DIMENSION_END)
+        float fogT = clamp01(1.0 - exp(-viewDist * 0.008 * FOG_DENSITY));
+        portalColor = mix(portalColor, evalEndSky(viewDir, frameTimeCounter), fogT);
+#else
+        AtmosphereState atmo = unpackAtmosphereVaryings(
+            vAtmoZenith, vAtmoHorizon, vAtmoMie, vAtmoDirect,
+            vAtmoAmbSky, vAtmoAmbGround, vAtmoSunDir, vAtmoShadowDir
+        );
+        portalColor = applyOverworldMediumAndFog(
+            portalColor, viewDir, vFeetPos, viewDist, far, atmo, cameraPosition.y,
+            isEyeInWater, blindness, darknessFactor
+        );
+#endif
+        outColor0 = vec4(max(portalColor, vec3(0.0)), portalAlpha);
+        return;
+    }
+
     // Drop vanilla 16x16 pixelated water texture so ripples and reflections stay silky-clean;
-    // preserve full texture alpha & albedo for stained glass, ice, slime, honey, and portals.
+    // preserve full texture alpha & albedo for stained glass, ice, slime, and honey.
     vec3 albedoLinear;
     float glassAlpha = 1.0;
     if (vIsWater > 0.5) {
@@ -169,9 +229,6 @@ void main() {
         baseNormal = -baseNormal;
     }
 
-    float viewDist = length(vFeetPos);
-    vec3 viewDir = vFeetPos / max(viewDist, 1e-4);
-
 #if defined(DIMENSION_NETHER) || defined(DIMENSION_END)
     LightingInputs lin;
     lin.albedoLinear = albedoLinear;
@@ -181,16 +238,16 @@ void main() {
     lin.skyLight = vLm.y;
     lin.blockLight = vLm.x;
     lin.shadowFactor = 1.0;
-    lin.matId = MAT_DEFAULT;
+    lin.matId = (vIsEmissive > 0.5) ? MAT_EMISSIVE : MAT_DEFAULT;
     lin.handLightLevel = max(float(heldBlockLightValue), float(heldBlockLightValue2)) / 15.0;
     lin.nightVision = nightVision;
 
   #if defined(DIMENSION_NETHER)
-    vec3 lit = shadeNetherOrEndSurface(lin, false);
-    float fogT = clamp01(1.0 - exp(-viewDist * 0.018 * FOG_DENSITY));
-    lit = mix(lit, srgbToLinear(fogColor) * 0.45 + vec3(0.08, 0.025, 0.012), fogT);
+    vec3 lit = shadeNetherOrEndSurface(lin, false, fogColor);
+    float fogT = clamp01(1.0 - exp(-max(viewDist - 64.0, 0.0) * 0.005 * FOG_DENSITY));
+    lit = mix(lit, getNetherFogAndSkyColor(fogColor), fogT);
   #else
-    vec3 lit = shadeNetherOrEndSurface(lin, true);
+    vec3 lit = shadeNetherOrEndSurface(lin, true, fogColor);
     float fogT = clamp01(1.0 - exp(-viewDist * 0.008 * FOG_DENSITY));
     lit = mix(lit, evalEndSky(viewDir, frameTimeCounter), fogT);
   #endif
@@ -263,7 +320,7 @@ void main() {
         lin.skyLight = vLm.y;
         lin.blockLight = vLm.x;
         lin.shadowFactor = shadowFactor;
-        lin.matId = MAT_SPECULAR;
+        lin.matId = (vIsEmissive > 0.5) ? MAT_EMISSIVE : MAT_SPECULAR;
         lin.handLightLevel = handLightLevel;
         lin.nightVision = nightVision;
 

@@ -26,10 +26,12 @@ vec3 safeNormalize(vec3 v, vec3 fallback) {
     return (lenSq > 1e-8) ? (v * inversesqrt(lenSq)) : fallback;
 }
 
-// Fast polynomial sRGB -> Linear (Chilliant, <0.1% error, 0 pow() calls)
+// Accurate piecewise sRGB -> Linear (IEC 61966-2-1): preserves dark texture details (obsidian, coal, deepslate)
 vec3 srgbToLinear(vec3 c) {
     c = clamp01(c);
-    return c * (c * (c * 0.305306011 + 0.682171111) + 0.012522878);
+    vec3 low  = c * (1.0 / 12.92);
+    vec3 high = pow((c + vec3(0.055)) * (1.0 / 1.055), vec3(2.4));
+    return mix(low, high, step(vec3(0.04045), c));
 }
 
 // Accurate piecewise Linear -> sRGB for final swapchain output

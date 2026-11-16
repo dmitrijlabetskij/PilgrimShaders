@@ -29,7 +29,7 @@ vec3 viewToFeetPos(vec3 viewPos, mat4 modelViewInverse) {
 }
 
 vec3 viewDirToWorld(vec3 dirView, mat4 modelViewInverse) {
-    return normalize(mat3(modelViewInverse) * dirView);
+    return safeNormalize(mat3(modelViewInverse) * dirView, vec3(0.0, 1.0, 0.0));
 }
 
 // Compute camera-relative world position wrapped at 64-block intervals for wave precision

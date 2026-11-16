@@ -29,9 +29,9 @@ struct AtmosphereState {
 
 AtmosphereState buildAtmosphere(vec3 sunDir, vec3 shadowLightDir, float rainStrength) {
     AtmosphereState atmo;
-    atmo.sunDir = normalize(sunDir);
+    atmo.sunDir = safeNormalize(sunDir, vec3(0.0, 1.0, 0.0));
     atmo.moonDir = -atmo.sunDir;
-    atmo.shadowLightDir = normalize(shadowLightDir);
+    atmo.shadowLightDir = safeNormalize(shadowLightDir, vec3(0.0, 1.0, 0.0));
     atmo.rainStrength = clamp01(rainStrength);
 
     float sunY = atmo.sunDir.y;

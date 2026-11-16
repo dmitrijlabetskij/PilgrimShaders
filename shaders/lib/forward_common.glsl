@@ -36,6 +36,7 @@ uniform vec3 sunPosition;
 uniform vec3 shadowLightPosition;
 uniform float rainStrength;
 #ifdef FORWARD_VERTEX_LIT
+uniform vec3 fogColor;
 uniform float nightVision;
 uniform int heldBlockLightValue;
 uniform int heldBlockLightValue2;
@@ -49,6 +50,7 @@ out vec3 vFeetPos;
 #ifdef FORWARD_VERTEX_LIT
 out vec3 vVertexLight;
 #endif
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 flat out vec4 vAtmoZenith;
 flat out vec4 vAtmoHorizon;
 flat out vec4 vAtmoMie;
@@ -63,6 +65,7 @@ flat out vec4 vShadowC1;
 flat out vec4 vShadowC2;
 flat out vec4 vShadowC3;
 #endif
+#endif
 
 void main() {
     vUv = (textureMatrix * vec4(vaUV0, 0.0, 1.0)).xy;
@@ -76,6 +79,7 @@ void main() {
     vec3 viewNormal = safeNormalize(normalMatrix * vaNormal, vec3(0.0, 1.0, 0.0));
     vWorldNormal = safeNormalize(mat3(gbufferModelViewInverse) * viewNormal, vec3(0.0, 1.0, 0.0));
 
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
     vec3 sunDir = viewDirToWorld(sunPosition, gbufferModelViewInverse);
     vec3 shadowDir = viewDirToWorld(shadowLightPosition, gbufferModelViewInverse);
     AtmosphereState atmo = buildAtmosphere(sunDir, shadowDir, rainStrength);
@@ -89,6 +93,7 @@ void main() {
     vShadowC1 = shadowVP[1];
     vShadowC2 = shadowVP[2];
     vShadowC3 = shadowVP[3];
+#endif
 #endif
 
 #ifdef FORWARD_VERTEX_LIT
@@ -104,9 +109,9 @@ void main() {
     vlin.handLightLevel = max(float(heldBlockLightValue), float(heldBlockLightValue2)) / 15.0;
     vlin.nightVision = nightVision;
   #if defined(DIMENSION_NETHER)
-    vVertexLight = shadeNetherOrEndSurface(vlin, false);
+    vVertexLight = shadeNetherOrEndSurface(vlin, false, fogColor);
   #elif defined(DIMENSION_END)
-    vVertexLight = shadeNetherOrEndSurface(vlin, true);
+    vVertexLight = shadeNetherOrEndSurface(vlin, true, fogColor);
   #else
     vVertexLight = shadeOverworldSurface(vlin, atmo);
   #endif
@@ -145,6 +150,7 @@ in vec3 vFeetPos;
 #ifdef FORWARD_VERTEX_LIT
 in vec3 vVertexLight;
 #endif
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 flat in vec4 vAtmoZenith;
 flat in vec4 vAtmoHorizon;
 flat in vec4 vAtmoMie;
@@ -158,6 +164,7 @@ flat in vec4 vShadowC0;
 flat in vec4 vShadowC1;
 flat in vec4 vShadowC2;
 flat in vec4 vShadowC3;
+#endif
 #endif
 
 /* RENDERTARGETS: 0 */
@@ -193,11 +200,11 @@ void main() {
         lit += albedoLinear * 1.1;
     }
   #if defined(DIMENSION_NETHER)
-    float netherFog = 1.0 - exp(-viewDist * 0.018 * FOG_DENSITY);
-    lit = mix(lit, srgbToLinear(fogColor) * 0.45 + vec3(0.08, 0.025, 0.012), clamp01(netherFog));
+    float netherFog = 1.0 - exp(-max(viewDist - 64.0, 0.0) * 0.005 * FOG_DENSITY);
+    lit = mix(lit, getNetherFogAndSkyColor(fogColor), clamp01(netherFog));
   #elif defined(DIMENSION_END)
     float endFog = 1.0 - exp(-viewDist * 0.008 * FOG_DENSITY);
-    lit = mix(lit, vec3(0.03, 0.015, 0.06), clamp01(endFog));
+    lit = mix(lit, vec3(0.08, 0.04, 0.12), clamp01(endFog));
   #else
     AtmosphereState atmo = unpackAtmosphereVaryings(
         vAtmoZenith, vAtmoHorizon, vAtmoMie, vAtmoDirect,
@@ -227,6 +234,8 @@ void main() {
     lin.blockLight = vLm.x;
 #ifdef GBUFFER_ENTITY
     lin.matId = MAT_SKIN_ENTITY;
+#elif defined(FORWARD_HAND)
+    lin.matId = MAT_HAND;
 #else
     lin.matId = MAT_DEFAULT;
 #endif
@@ -235,14 +244,14 @@ void main() {
 
 #if defined(DIMENSION_NETHER)
     lin.shadowFactor = 1.0;
-    vec3 lit = shadeNetherOrEndSurface(lin, false);
-    float netherFog = 1.0 - exp(-viewDist * 0.018 * FOG_DENSITY);
-    lit = mix(lit, srgbToLinear(fogColor) * 0.45 + vec3(0.08, 0.025, 0.012), clamp01(netherFog));
+    vec3 lit = shadeNetherOrEndSurface(lin, false, fogColor);
+    float netherFog = 1.0 - exp(-max(viewDist - 64.0, 0.0) * 0.005 * FOG_DENSITY);
+    lit = mix(lit, getNetherFogAndSkyColor(fogColor), clamp01(netherFog));
 #elif defined(DIMENSION_END)
     lin.shadowFactor = 1.0;
-    vec3 lit = shadeNetherOrEndSurface(lin, true);
+    vec3 lit = shadeNetherOrEndSurface(lin, true, fogColor);
     float endFog = 1.0 - exp(-viewDist * 0.008 * FOG_DENSITY);
-    lit = mix(lit, vec3(0.03, 0.015, 0.06), clamp01(endFog));
+    lit = mix(lit, vec3(0.08, 0.04, 0.12), clamp01(endFog));
 #else
     AtmosphereState atmo = unpackAtmosphereVaryings(
         vAtmoZenith, vAtmoHorizon, vAtmoMie, vAtmoDirect,
@@ -259,6 +268,9 @@ void main() {
     vec3 lit = albedoLinear * weatherLight;
   #else
     #ifdef FORWARD_SHADOWS
+    #ifdef FORWARD_HAND
+    lin.shadowFactor = smoothstep(0.40, 0.95, vLm.y);
+    #else
     mat4 shadowVP = mat4(vShadowC0, vShadowC1, vShadowC2, vShadowC3);
     lin.shadowFactor = sampleShadowMap(
         shadowtex0,
@@ -273,6 +285,7 @@ void main() {
         atmo.shadowFade,
         false
     );
+    #endif
     #else
     lin.shadowFactor = 1.0; // Skip shadow read on particles for speed
     #endif

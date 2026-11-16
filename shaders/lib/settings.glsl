@@ -35,6 +35,7 @@ const int MAT_FOLIAGE     = 1;
 const int MAT_EMISSIVE    = 2;
 const int MAT_SPECULAR    = 3;
 const int MAT_SKIN_ENTITY = 4;
+const int MAT_HAND        = 5;
 
 // --- Block Properties IDs (Matching block.properties) ---
 const int BLOCK_WATER           = 10001;
@@ -43,5 +44,6 @@ const int BLOCK_FOLIAGE_CANOPY  = 10003;
 const int BLOCK_EMISSIVE        = 10004;
 const int BLOCK_SPECULAR        = 10005;
 const int BLOCK_GLASS           = 10006;
+const int BLOCK_PORTAL          = 10007;
 
 #endif // LIB_SETTINGS_GLSL

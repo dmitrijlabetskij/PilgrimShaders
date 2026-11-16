@@ -65,6 +65,10 @@ vec3 tonemapACES(vec3 col) {
 }
 
 vec3 applyGradingAndTonemap(vec3 hdrColor, vec2 fragCoord) {
+    if (isnan(hdrColor.r) || isnan(hdrColor.g) || isnan(hdrColor.b) ||
+        isinf(hdrColor.r) || isinf(hdrColor.g) || isinf(hdrColor.b)) {
+        hdrColor = vec3(0.0);
+    }
     vec3 col = max(hdrColor, vec3(0.0)) * EXPOSURE;
 
 #if TONEMAP_MODE == 0

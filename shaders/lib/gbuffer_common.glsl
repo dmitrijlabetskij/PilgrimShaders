@@ -64,6 +64,9 @@ void main() {
 #ifdef GBUFFER_ENTITY
     matId = MAT_SKIN_ENTITY;
 #endif
+#ifdef GBUFFER_HAND
+    matId = MAT_HAND;
+#endif
 #ifdef GBUFFER_EMISSIVE
     matId = MAT_EMISSIVE;
 #endif
@@ -142,12 +145,6 @@ void main() {
 
     vec3 albedoSrgb = tex.rgb * vColor.rgb;
 
-#ifdef GBUFFER_TERRAIN
-    // separateAo=true puts vanilla smooth-lighting AO in vColor.a on terrain
-    float ao = mix(1.0, clamp01(vColor.a), 0.78);
-    albedoSrgb *= ao;
-#endif
-
 #ifdef GBUFFER_ENTITY
     // Hit flash (red) & creeper swell flash (white)
     albedoSrgb = mix(albedoSrgb, entityColor.rgb, entityColor.a);
@@ -157,6 +154,13 @@ void main() {
     vec3 albedoLinear = albedoSrgb;
 #else
     vec3 albedoLinear = srgbToLinear(albedoSrgb);
+#endif
+
+#ifdef GBUFFER_TERRAIN
+    // Apply vanilla smooth-lighting AO linearly so dark blocks (obsidian, blackstone, coal)
+    // are not double-squared into pitch-black voids
+    float ao = mix(1.0, clamp01(vColor.a), 0.65);
+    albedoLinear *= ao;
 #endif
 
 #ifdef GBUFFER_COLOR_ONLY
@@ -179,7 +183,7 @@ void main() {
   #endif
 
     // Write only 8 bytes/pixel total: R11F_G11F_B10F (4B) + RGBA8 (4B)
-#ifdef GBUFFER_ENTITY
+#if defined(GBUFFER_ENTITY) || defined(GBUFFER_HAND)
     outColor0 = vec4(max(albedoLinear, vec3(0.0)), clamp01(tex.a * vColor.a));
 #else
     outColor0 = vec4(max(albedoLinear, vec3(0.0)), 1.0);

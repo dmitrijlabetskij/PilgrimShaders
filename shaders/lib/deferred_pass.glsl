@@ -26,6 +26,7 @@ uniform float rainStrength;
 out vec3 vWorldRay;
 flat out vec3 vCameraOffset;
 flat out vec2 vDepthCoeff;
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 flat out vec4 vAtmoZenith;
 flat out vec4 vAtmoHorizon;
 flat out vec4 vAtmoMie;
@@ -38,6 +39,7 @@ flat out vec4 vShadowC0;
 flat out vec4 vShadowC1;
 flat out vec4 vShadowC2;
 flat out vec4 vShadowC3;
+#endif
 
 void main() {
     vec4 clipPos = projectionMatrix * modelViewMatrix * vec4(vaPosition, 1.0);
@@ -54,6 +56,7 @@ void main() {
         gbufferProjectionInverse[3][3] - gbufferProjectionInverse[2][3]
     );
 
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
     vec3 sunDir = viewDirToWorld(sunPosition, gbufferModelViewInverse);
     vec3 shadowDir = viewDirToWorld(shadowLightPosition, gbufferModelViewInverse);
     AtmosphereState atmo = buildAtmosphere(sunDir, shadowDir, rainStrength);
@@ -68,6 +71,7 @@ void main() {
     vShadowC1 = shadowVP[1];
     vShadowC2 = shadowVP[2];
     vShadowC3 = shadowVP[3];
+#endif
 
     gl_Position = clipPos;
 }
@@ -105,6 +109,7 @@ uniform int heldBlockLightValue2;
 in vec3 vWorldRay;
 flat in vec3 vCameraOffset;
 flat in vec2 vDepthCoeff;
+#if !defined(DIMENSION_NETHER) && !defined(DIMENSION_END)
 flat in vec4 vAtmoZenith;
 flat in vec4 vAtmoHorizon;
 flat in vec4 vAtmoMie;
@@ -117,6 +122,7 @@ flat in vec4 vShadowC0;
 flat in vec4 vShadowC1;
 flat in vec4 vShadowC2;
 flat in vec4 vShadowC3;
+#endif
 
 /* RENDERTARGETS: 0 */
 layout(location = 0) out vec4 outColor0;
@@ -134,10 +140,10 @@ void main() {
 
     // Sky early-out: skips colortex0, colortex1, shadowtex0, and linearZ decode!
     if (depth >= 0.999999) {
-        vec3 viewDir = normalize(vWorldRay);
+        vec3 viewDir = safeNormalize(vWorldRay, vec3(0.0, 1.0, 0.0));
         vec3 skyColor;
 #if defined(DIMENSION_NETHER)
-        skyColor = srgbToLinear(fogColor) * 0.45 + vec3(0.08, 0.025, 0.012);
+        skyColor = getNetherFogAndSkyColor(fogColor);
 #elif defined(DIMENSION_END)
         skyColor = evalEndSky(viewDir, frameTimeCounter);
 #else
@@ -159,13 +165,15 @@ void main() {
         return;
     }
 
-    float linearZ = 1.0 / (vDepthCoeff.x * depth + vDepthCoeff.y);
+    float denom = vDepthCoeff.x * depth + vDepthCoeff.y;
+    float linearZ = 1.0 / max(denom, 1e-6);
     vec3 feetPos = vWorldRay * linearZ + vCameraOffset;
     float viewDist = length(feetPos);
-    vec3 viewDir = feetPos / max(viewDist, 1e-4);
+    vec3 viewDir = (viewDist > 1e-4) ? (feetPos / viewDist) : vec3(0.0, 0.0, -1.0);
+    viewDist = clamp(viewDist, 0.0, 4096.0);
 
     // Read packed G-buffer (only 2 color reads!)
-    vec3 albedoLinear = texelFetch(colortex0, texel, 0).rgb;
+    vec3 albedoLinear = max(texelFetch(colortex0, texel, 0).rgb, vec3(0.0));
     vec4 gbuf1 = texelFetch(colortex1, texel, 0);
 
     vec3 worldNormal;
@@ -187,18 +195,19 @@ void main() {
 
 #if defined(DIMENSION_NETHER)
     lin.shadowFactor = 1.0;
-    vec3 lit = shadeNetherOrEndSurface(lin, false);
-    float netherFog = clamp01(1.0 - exp(-viewDist * 0.018 * FOG_DENSITY));
-    lit = mix(lit, srgbToLinear(fogColor) * 0.45 + vec3(0.08, 0.025, 0.012), netherFog);
+    vec3 lit = shadeNetherOrEndSurface(lin, false, fogColor);
+    float netherFog = clamp01(1.0 - exp(-max(viewDist - 64.0, 0.0) * 0.005 * FOG_DENSITY));
+    lit = mix(lit, getNetherFogAndSkyColor(fogColor), netherFog);
 #elif defined(DIMENSION_END)
     lin.shadowFactor = 1.0;
-    vec3 lit = shadeNetherOrEndSurface(lin, true);
+    vec3 lit = shadeNetherOrEndSurface(lin, true, fogColor);
     float endFog = clamp01(1.0 - exp(-viewDist * 0.008 * FOG_DENSITY));
     lit = mix(lit, evalEndSky(viewDir, frameTimeCounter), endFog);
 #else
     // Skip shadow sampling completely inside sealed caves (skyLight <= 0.02)
-    if (skyLight <= 0.02) {
-        lin.shadowFactor = 0.0;
+    // or on first-person hand (matId == MAT_HAND) to avoid third-person self-shadow jitter
+    if (skyLight <= 0.02 || matId == MAT_HAND) {
+        lin.shadowFactor = (matId == MAT_HAND) ? smoothstep(0.40, 0.95, skyLight) : 0.0;
     } else {
         mat4 shadowVP = mat4(vShadowC0, vShadowC1, vShadowC2, vShadowC3);
         float NdotL = dot(worldNormal, atmo.shadowLightDir);
@@ -226,8 +235,11 @@ void main() {
 #endif
 
 #if defined(DIMENSION_NETHER) || defined(DIMENSION_END)
-    float blind = clamp01(max(blindness, darknessFactor));
-    lit *= mix(1.0, exp(-viewDist * 0.18), blind);
+    float bVal = max(blindness, darknessFactor);
+    if (bVal > 0.001) {
+        float blind = clamp01(bVal);
+        lit *= mix(1.0, exp(-viewDist * 0.18), blind);
+    }
 #endif
 
     lit *= 1.0 + ignCentered(gl_FragCoord.xy) * (1.0 / 64.0);
